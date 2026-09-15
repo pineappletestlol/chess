@@ -1,0 +1,1029 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hand & Brain</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;}
+body{
+  font-family:'Inter',-apple-system,sans-serif;
+  background:#f4f1ea;
+  color:#22201b;
+  min-height:100vh;
+  padding:40px 20px;
+}
+.wrap{max-width:1060px;margin:0 auto;}
+#screen-lobby .card, #screen-waiting .card{max-width:640px;}
+h1{font-size:24px;font-weight:700;letter-spacing:-0.5px;}
+.sub{color:#7a766c;font-size:13.5px;margin-top:4px;}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:36px;}
+.userbox{text-align:right;font-size:13px;}
+.userbox .name{font-weight:600;}
+.userbox .rating{color:#7a766c;margin-top:2px;}
+.card{
+  background:#fffdf9;
+  border:1px solid #e4ddcf;
+  border-radius:12px;
+  padding:28px;
+  margin-bottom:24px;
+}
+.card h2{font-size:16px;font-weight:600;margin-bottom:8px;}
+.card p.desc{color:#7a766c;font-size:13.5px;margin-bottom:18px;line-height:1.6;}
+button{
+  background:#1f6f5c;
+  color:#fff;
+  border:none;
+  border-radius:7px;
+  padding:11px 18px;
+  font-size:13.5px;
+  font-weight:600;
+  cursor:pointer;
+  font-family:inherit;
+}
+button:hover{background:#18594a;}
+button.secondary{background:#efe9db;color:#22201b;}
+button.secondary:hover{background:#e4ddcb;}
+button:disabled{opacity:0.5;cursor:default;}
+input[type=text]{
+  border:1px solid #d8d1bf;
+  border-radius:7px;
+  padding:10px 12px;
+  font-size:13.5px;
+  font-family:inherit;
+  width:100%;
+}
+.row{display:flex;gap:12px;align-items:center;}
+.row input{flex:1;}
+.modes{display:flex;gap:12px;margin-bottom:20px;}
+.modebtn{
+  flex:1;
+  border:1px solid #d8d1bf;
+  border-radius:8px;
+  padding:14px;
+  text-align:center;
+  font-size:13px;
+  font-weight:600;
+  cursor:pointer;
+  background:#fff;
+}
+.modebtn.active{border-color:#1f6f5c;background:#eaf3ef;color:#155646;}
+.hint{font-size:12px;color:#9a9585;margin-top:6px;line-height:1.4;}
+.code-display{
+  font-size:34px;
+  font-weight:700;
+  letter-spacing:7px;
+  text-align:center;
+  background:#eee7d6;
+  border-radius:8px;
+  padding:18px;
+  margin:20px 0;
+}
+.seat{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:12px 14px;border:1px solid #e4ddcf;border-radius:8px;margin-bottom:10px;
+  font-size:13.5px;
+}
+.seat .who{color:#7a766c;}
+.seat .taken{font-weight:600;color:#22201b;}
+.board-wrap{display:flex;gap:36px;flex-wrap:wrap;align-items:flex-start;}
+:root{ --sq: clamp(30px, 9vw, 84px); }
+.board{
+  display:grid;grid-template-columns:repeat(8,var(--sq));grid-template-rows:repeat(8,var(--sq));
+  flex-shrink:0;box-shadow:0 2px 10px rgba(0,0,0,0.12);border-radius:2px;overflow:hidden;
+}
+.sq{
+  position:relative;width:var(--sq);height:var(--sq);display:flex;align-items:center;justify-content:center;
+  font-size:calc(var(--sq) * 0.7);cursor:default;user-select:none;line-height:1;
+}
+.sq.light{background:#f0d9b5;}
+.sq.dark{background:#b58863;}
+.sq.from{background:#f6f66a;}
+.sq.selectable{cursor:pointer;}
+.sq.dest{cursor:pointer;}
+.sq.dest::after{
+  content:'';position:absolute;width:26%;height:26%;border-radius:50%;
+  background:rgba(20,20,15,0.28);z-index:1;
+}
+.sq.dest.capture::after{
+  content:'';position:absolute;width:86%;height:86%;border-radius:50%;
+  background:transparent;box-shadow:inset 0 0 0 5px rgba(20,20,15,0.28);z-index:1;
+}
+.coord{position:absolute;font-size:clamp(8px,2vw,12px);font-weight:700;z-index:2;}
+.coord.rank{top:2px;left:4px;}
+.coord.file{bottom:1px;right:5px;}
+.sq.light .coord{color:#b58863;}
+.sq.dark .coord{color:#f0d9b5;}
+.piece-img{width:80%;height:80%;pointer-events:none;user-select:none;}
+.panel{flex:1;min-width:280px;max-width:340px;padding-top:6px;}
+.announce{
+  background:#eaf3ef;color:#155646;font-weight:700;font-size:15px;
+  padding:12px 16px;border-radius:8px;margin-bottom:16px;text-align:center;
+}
+.announce.empty{background:#efe9db;color:#7a766c;font-weight:600;}
+.types{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;}
+.status-msg{font-size:13.5px;color:#7a766c;margin-bottom:14px;line-height:1.6;}
+.movelog{
+  font-size:12.5px;color:#5a564c;max-height:140px;overflow-y:auto;
+  border-top:1px solid #e4ddcf;padding-top:12px;margin-top:14px;line-height:1.8;
+}
+.result-banner{
+  background:#22201b;color:#fff;padding:18px;border-radius:8px;text-align:center;margin-bottom:18px;
+}
+.result-banner .rc{font-size:12.5px;color:#c9c4b6;margin-top:6px;}
+.backlink{font-size:13px;color:#1f6f5c;cursor:pointer;text-decoration:underline;}
+.sq.in-check{box-shadow:inset 0 0 22px 6px rgba(217,104,107,0.85);}
+.game-actions{display:flex;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid #e4ddcf;}
+.game-actions button{flex:1;}
+button.danger{background:#fff;color:#b8433f;border:1px solid #e0c3c1;}
+button.danger:hover{background:#fbecec;}
+.draw-offer{
+  background:#fff6e6;border:1px solid #e8d6ae;border-radius:8px;padding:12px 14px;
+  font-size:13px;margin-bottom:14px;color:#7a5c1f;
+}
+.draw-offer-btns{display:flex;gap:8px;margin-top:10px;}
+.draw-offer-btns button{flex:1;padding:8px 10px;font-size:12.5px;}
+.clock{
+  display:flex;justify-content:space-between;align-items:center;
+  background:#efe9db;border-radius:7px;padding:10px 14px;margin-bottom:10px;
+  font-family:monospace;font-size:20px;font-weight:700;
+}
+.clock.active{background:#1f6f5c;color:#fff;}
+.clock .label{font-family:'Inter',sans-serif;font-size:11px;font-weight:600;color:#7a766c;}
+.clock.active .label{color:#cfe9e1;}
+.tc-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;}
+.tcbtn{
+  border:1px solid #d8d1bf;border-radius:7px;padding:8px 12px;font-size:12.5px;font-weight:600;
+  cursor:pointer;background:#fff;
+}
+.tcbtn.active{border-color:#1f6f5c;background:#eaf3ef;color:#155646;}
+@media (max-width:480px){
+  body{padding:16px 10px;}
+  .board-wrap{gap:18px;}
+  header{margin-bottom:24px;}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Hand &amp; Brain</h1>
+      <div class="sub">announce a piece, move only that piece</div>
+    </div>
+    <div class="userbox" id="userbox"></div>
+  </header>
+
+  <div id="screen-auth" style="display:none"></div>
+  <div id="screen-lobby" style="display:none"></div>
+  <div id="screen-waiting" style="display:none"></div>
+  <div id="screen-game" style="display:none"></div>
+  <div id="screen-leaderboard" style="display:none"></div>
+</div>
+
+<script>
+const PIECE_NAMES = {p:"Pawn",n:"Knight",b:"Bishop",r:"Rook",q:"Queen",k:"King"};
+const PIECE_UNICODE = {
+  w:{p:"\u2659",n:"\u2658",b:"\u2657",r:"\u2656",q:"\u2655",k:"\u2654"},
+  b:{p:"\u265F",n:"\u265E",b:"\u265D",r:"\u265C",q:"\u265B",k:"\u265A"}
+};
+// Cburnett piece set (Wikimedia Commons) - the same set Lichess uses by default
+function pieceImgUrl(color, type){
+  const colorLetter = color==='w' ? 'l' : 'd';
+  return `https://commons.wikimedia.org/wiki/Special:FilePath/Chess_${type}${colorLetter}t45.svg`;
+}
+
+// PASTE your Firebase config below (Firebase console > Project settings > Your apps > Web app)
+const firebaseConfig = {
+  apiKey: "AIzaSyDZ5T0JcPWZviltGwBqu9AuRz_cEhdqr0s",
+  authDomain: "anythingchess-46f24.firebaseapp.com",
+  databaseURL: "https://anythingchess-46f24-default-rtdb.firebaseio.com",
+  projectId: "anythingchess-46f24",
+  storageBucket: "anythingchess-46f24.firebasestorage.app",
+  messagingSenderId: "137582626702",
+  appId: "1:137582626702:web:14ad934c8298d0411086df"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+function dbPath(key){ return key.replace(/:/g, '/'); }
+
+async function kget(key, shared){
+  if(shared === false){
+    try{ const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; }catch(e){ return null; }
+  }
+  try{ const snap = await db.ref(dbPath(key)).once('value'); return snap.exists() ? snap.val() : null; }catch(e){ console.error(e); return null; }
+}
+async function kset(key, value, shared){
+  if(shared === false){
+    try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e){}
+    return;
+  }
+  try{ await db.ref(dbPath(key)).set(value); }catch(e){ console.error(e); }
+}
+
+let ME = null;
+let currentGameId = null;
+let pollTimer = null;
+let selectedSquare = null;
+
+function genCode(){
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let c = "";
+  for(let i=0;i<5;i++) c += chars[Math.floor(Math.random()*chars.length)];
+  return c;
+}
+
+async function sha256Hex(str){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+// Returns true if a saved session matched a real account and ME got set.
+async function ensureUser(){
+  const session = await kget('hb:session', false);
+  if(session && session.username){
+    const hash = await kget('hb:account:'+session.username+':passwordHash', true);
+    if(hash){
+      ME = {username: session.username};
+      const profile = await kget('hb:leaderboard:'+session.username, true) || {rating:1200, games:0};
+      renderUserbox(profile);
+      return true;
+    }
+  }
+  return false;
+}
+
+function renderUserbox(profile){
+  document.getElementById('userbox').innerHTML =
+    '<div class="name">'+ME.username+'</div>'+
+    '<div class="rating">rating '+profile.rating+' &middot; '+profile.games+' games</div>'+
+    '<div style="margin-top:6px;font-size:12px;"><span class="backlink" id="btnLeaderboard">leaderboard</span> &middot; <span class="backlink" id="btnLogout">log out</span></div>';
+  const lb = document.getElementById('btnLeaderboard');
+  if(lb) lb.onclick = renderLeaderboard;
+  const lo = document.getElementById('btnLogout');
+  if(lo) lo.onclick = logout;
+}
+
+async function logout(){
+  stopPoll();
+  await kset('hb:session', null, false);
+  ME = null;
+  currentGameId = null;
+  document.getElementById('userbox').innerHTML = '';
+  authMode = 'login';
+  renderAuthScreen();
+}
+
+// ================= AUTH =================
+let authMode = 'login';
+
+function renderAuthScreen(err){
+  showScreen('auth');
+  const el = document.getElementById('screen-auth');
+  el.innerHTML = `
+    <div class="card">
+      <h2>${authMode==='login' ? 'Log in' : 'Create an account'}</h2>
+      <p class="desc">${authMode==='login' ? 'Welcome back.' : 'Just a username, email and password - no profile setup needed.'}</p>
+      ${err ? '<div class="draw-offer" style="color:#b8433f;">'+err+'</div>' : ''}
+      <div class="row" style="flex-direction:column;align-items:stretch;gap:10px;">
+        <input type="text" id="authUsername" placeholder="username" autocomplete="username">
+        ${authMode==='signup' ? '<input type="text" id="authEmail" placeholder="email" autocomplete="email">' : ''}
+        <input type="password" id="authPassword" placeholder="password" autocomplete="${authMode==='login'?'current-password':'new-password'}">
+      </div>
+      <div style="margin-top:16px;display:flex;gap:10px;">
+        <button id="btnAuthSubmit">${authMode==='login' ? 'Log in' : 'Sign up'}</button>
+        <button class="secondary" id="btnAuthSwitch">${authMode==='login' ? "Need an account? Sign up" : "Have an account? Log in"}</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('btnAuthSwitch').onclick = ()=>{ authMode = authMode==='login'?'signup':'login'; renderAuthScreen(); };
+  document.getElementById('btnAuthSubmit').onclick = authMode==='login' ? doLogin : doSignup;
+  el.querySelectorAll('input').forEach(inp=>{
+    inp.onkeydown = (e)=>{ if(e.key==='Enter') document.getElementById('btnAuthSubmit').click(); };
+  });
+}
+
+async function doSignup(){
+  const username = document.getElementById('authUsername').value.trim();
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  if(!username || !email || !password){ renderAuthScreen('Fill in all fields.'); return; }
+  if(!/^[A-Za-z0-9_]{3,20}$/.test(username)){ renderAuthScreen('Username: 3-20 letters, numbers or underscores.'); return; }
+  if(!/^\S+@\S+\.\S+$/.test(email)){ renderAuthScreen('Enter a valid email.'); return; }
+  if(password.length < 6){ renderAuthScreen('Password needs at least 6 characters.'); return; }
+  const existingHash = await kget('hb:account:'+username+':passwordHash', true);
+  if(existingHash){ renderAuthScreen('That username is taken.'); return; }
+  const passwordHash = await sha256Hex(password);
+  await kset('hb:account:'+username, {passwordHash, email}, true);
+  const profile = {rating:1200, games:0};
+  await kset('hb:leaderboard:'+username, profile, true);
+  await kset('hb:session', {username}, false);
+  ME = {username};
+  renderUserbox(profile);
+  await afterAuth();
+}
+
+async function doLogin(){
+  const username = document.getElementById('authUsername').value.trim();
+  const password = document.getElementById('authPassword').value;
+  if(!username || !password){ renderAuthScreen('Fill in all fields.'); return; }
+  const storedHash = await kget('hb:account:'+username+':passwordHash', true);
+  if(!storedHash){ renderAuthScreen('No account with that username.'); return; }
+  const passwordHash = await sha256Hex(password);
+  if(storedHash !== passwordHash){ renderAuthScreen('Wrong password.'); return; }
+  await kset('hb:session', {username}, false);
+  ME = {username};
+  const profile = await kget('hb:leaderboard:'+username, true) || {rating:1200, games:0};
+  renderUserbox(profile);
+  await afterAuth();
+}
+
+// ================= LEADERBOARD =================
+async function renderLeaderboard(){
+  stopPoll();
+  showScreen('leaderboard');
+  const el = document.getElementById('screen-leaderboard');
+  el.innerHTML = '<div class="card"><h2>Leaderboard</h2><p class="desc">Loading...</p></div>';
+  const snap = await db.ref('hb/leaderboard').once('value');
+  const users = snap.exists() ? snap.val() : {};
+  const rows = Object.keys(users)
+    .map(u=>({username:u, rating:users[u].rating||1200, games:users[u].games||0}))
+    .filter(u=>u.games>0)
+    .sort((a,b)=>b.rating-a.rating)
+    .slice(0,50);
+  const rowsHtml = rows.length ? rows.map((u,i)=>`
+    <div class="seat"><span class="who">#${i+1} ${u.username}${u.username===ME.username?' (you)':''}</span><span class="taken">${u.rating} &middot; ${u.games} games</span></div>
+  `).join('') : '<p class="desc">No rated games played yet - play a Quick match to get on the board.</p>';
+  el.innerHTML = `
+    <div class="card">
+      <h2>Leaderboard</h2>
+      <p class="desc">Ranked by rating. Only rated (Quick match) games count.</p>
+      ${rowsHtml}
+      <div style="margin-top:14px;"><span class="backlink" id="btnBackFromLb">Back to lobby</span></div>
+    </div>
+  `;
+  document.getElementById('btnBackFromLb').onclick = renderLobby;
+}
+
+function expectedScore(ra, rb){ return 1/(1+Math.pow(10,(rb-ra)/400)); }
+async function applyEloResult(whiteUser, blackUser, scoreWhite){
+  const pw = await kget('hb:leaderboard:'+whiteUser, true) || {rating:1200, games:0};
+  const pb = await kget('hb:leaderboard:'+blackUser, true) || {rating:1200, games:0};
+  const K = 32;
+  const ew = expectedScore(pw.rating, pb.rating);
+  const eb = 1 - ew;
+  const newW = Math.round(pw.rating + K*(scoreWhite - ew));
+  const newB = Math.round(pb.rating + K*((1-scoreWhite) - eb));
+  await kset('hb:leaderboard:'+whiteUser, {rating:newW, games:pw.games+1}, true);
+  await kset('hb:leaderboard:'+blackUser, {rating:newB, games:pb.games+1}, true);
+  return {whiteChange:newW-pw.rating, blackChange:newB-pb.rating};
+}
+
+function showScreen(name){
+  document.getElementById('screen-auth').style.display = name==='auth' ? 'block':'none';
+  document.getElementById('screen-lobby').style.display = name==='lobby' ? 'block':'none';
+  document.getElementById('screen-waiting').style.display = name==='waiting' ? 'block':'none';
+  document.getElementById('screen-game').style.display = name==='game' ? 'block':'none';
+  document.getElementById('screen-leaderboard').style.display = name==='leaderboard' ? 'block':'none';
+}
+
+function stopPoll(){
+  if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
+  if(activeListenerRef){ activeListenerRef.off(); activeListenerRef=null; }
+  if(clockTickTimer){ clearInterval(clockTickTimer); clockTickTimer=null; }
+}
+let activeListenerRef = null;
+
+// ================= LOBBY =================
+let createMode = 'team';
+const TIME_CONTROLS = [
+  {key:'none', label:'No clock', initial:0, increment:0},
+  {key:'1+0', label:'1+0', initial:60, increment:0},
+  {key:'3+2', label:'3+2', initial:180, increment:2},
+  {key:'5+3', label:'5+3', initial:300, increment:3},
+  {key:'10+5', label:'10+5', initial:600, increment:5},
+  {key:'15+10', label:'15+10', initial:900, increment:10}
+];
+let selectedTC = '5+3';
+
+function getTC(key){ return TIME_CONTROLS.find(t=>t.key===key) || TIME_CONTROLS[0]; }
+
+function renderLobby(){
+  showScreen('lobby');
+  stopPoll();
+  currentGameId = null;
+  const el = document.getElementById('screen-lobby');
+  const tcButtons = TIME_CONTROLS.map(t=>`<div class="tcbtn ${selectedTC===t.key?'active':''}" data-tc="${t.key}">${t.label}</div>`).join('');
+  el.innerHTML = `
+    <div class="card" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+      <div>
+        <h2 style="margin-bottom:2px;">Leaderboard</h2>
+        <p class="desc" style="margin-bottom:0;">See how you rank against everyone else.</p>
+      </div>
+      <button class="secondary" id="btnLobbyLeaderboard">View</button>
+    </div>
+    <div class="card">
+      <h2>Quick match</h2>
+      <p class="desc">1v1, random-button mode. Get matched with someone else looking to play right now. Rated.</p>
+      <div class="tc-row">${tcButtons}</div>
+      <button id="btnQuick">Find opponent</button>
+      <div class="hint" id="quickHint"></div>
+    </div>
+    <div class="card">
+      <h2>Play with friends</h2>
+      <p class="desc">Create a room and share the code, or join one someone gave you.</p>
+      <div class="modes">
+        <div class="modebtn ${createMode==='team'?'active':''}" data-mode="team">Team (4 players)<div class="hint">2 per side: Brain names a piece, Hand moves it</div></div>
+        <div class="modebtn ${createMode==='random'?'active':''}" data-mode="random">Random-button (2 players)<div class="hint">Each turn, hit Randomize for your piece type</div></div>
+      </div>
+      <div class="tc-row">${tcButtons.replace(/data-tc/g,'data-tc2')}</div>
+      <button id="btnCreate">Create room</button>
+      <div style="margin-top:14px;" class="row">
+        <input type="text" id="joinCode" placeholder="room code" maxlength="5">
+        <button class="secondary" id="btnJoin">Join</button>
+      </div>
+    </div>
+  `;
+  el.querySelectorAll('.modebtn').forEach(b=>{
+    b.onclick = ()=>{ createMode = b.dataset.mode; renderLobby(); };
+  });
+  el.querySelectorAll('[data-tc], [data-tc2]').forEach(b=>{
+    b.onclick = ()=>{ selectedTC = b.dataset.tc || b.dataset.tc2; renderLobby(); };
+  });
+  document.getElementById('btnCreate').onclick = createRoom;
+  document.getElementById('btnJoin').onclick = ()=>{
+    const code = document.getElementById('joinCode').value.trim().toUpperCase();
+    if(code) joinRoom(code);
+  };
+  document.getElementById('btnQuick').onclick = quickMatch;
+  document.getElementById('btnLobbyLeaderboard').onclick = renderLeaderboard;
+}
+
+function freshClock(tcKey){
+  const tc = getTC(tcKey);
+  return {initialSec: tc.initial, incrementSec: tc.increment, whiteMs: tc.initial*1000, blackMs: tc.initial*1000, turnStartedAt: 0};
+}
+
+async function createRoom(){
+  const code = genCode();
+  const game = {
+    mode: createMode,
+    status: 'waiting',
+    fen: new Chess().fen(),
+    turn: 'w',
+    announced: null,
+    moveLog: [],
+    winner: null,
+    drawOffer: "",
+    clock: freshClock(selectedTC),
+    seats: createMode==='team'
+      ? {whiteBrain:"", whiteHand:"", blackBrain:"", blackHand:""}
+      : {white:"", black:""}
+  };
+  await kset('hb:game:'+code, game, true);
+  currentGameId = code;
+  renderWaiting(code);
+}
+
+async function joinRoom(code){
+  const game = await kget('hb:game:'+code, true);
+  if(!game){ alert('No room with that code.'); return; }
+  currentGameId = code;
+  if(game.status==='active'){ enterGameScreen(code); return; }
+  renderWaiting(code);
+}
+
+function allSeatsFilled(game){
+  return Object.values(game.seats).every(v => !!v);
+}
+
+async function takeSeat(code, seatKey){
+  const game = await kget('hb:game:'+code, true);
+  if(!game || game.status==='active') return;
+  if(game.seats[seatKey]) return;
+  Object.keys(game.seats).forEach(k=>{ if(game.seats[k]===ME.username) game.seats[k]=""; });
+  game.seats[seatKey] = ME.username;
+  if(allSeatsFilled(game)){
+    game.status = 'active';
+    if(game.clock && game.clock.initialSec>0) game.clock.turnStartedAt = Date.now();
+  }
+  await kset('hb:game:'+code, game, true);
+}
+
+async function leaveSeatOnly(code, seatKey){
+  const game = await kget('hb:game:'+code, true);
+  if(!game || game.status==='active') return;
+  if(game.seats[seatKey]===ME.username) game.seats[seatKey]="";
+  await kset('hb:game:'+code, game, true);
+  drawWaiting(code, game);
+}
+
+async function quickMatch(){
+  document.getElementById('quickHint').innerHTML = 'Searching... <span class="backlink" id="btnCancelQuick">cancel</span>';
+  document.getElementById('btnCancelQuick').onclick = cancelQuickMatch;
+  document.getElementById('btnQuick').disabled = true;
+  const queueSnap = await db.ref('hb/queue/random').once('value');
+  const queueObj = queueSnap.exists() ? queueSnap.val() : {};
+  const now = Date.now();
+  const candidate = Object.keys(queueObj).find(u => u!==ME.username && !queueObj[u].gameId && queueObj[u].tc===selectedTC && (now-queueObj[u].joinedAt)<60000);
+  if(candidate){
+    const code = genCode();
+    const iAmWhite = Math.random() < 0.5;
+    const clock = freshClock(selectedTC);
+    if(clock.initialSec>0) clock.turnStartedAt = Date.now();
+    const game = {
+      mode:'random', status:'active', fen:new Chess().fen(), turn:'w', announced:null,
+      moveLog:[], winner:null, drawOffer:"", clock:clock,
+      seats: iAmWhite ? {white:ME.username, black:candidate} : {white:candidate, black:ME.username}
+    };
+    await kset('hb:game:'+code, game, true);
+    await db.ref('hb/queue/random/'+candidate+'/gameId').set(code);
+    await db.ref('hb/queue/random/'+ME.username).remove();
+    currentGameId = code;
+    enterGameScreen(code);
+  } else {
+    await db.ref('hb/queue/random/'+ME.username).set({joinedAt: now, gameId: "", tc: selectedTC});
+    activeListenerRef = db.ref('hb/queue/random/'+ME.username+'/gameId');
+    activeListenerRef.on('value', snap=>{
+      const gid = snap.val();
+      if(gid){
+        stopPoll();
+        db.ref('hb/queue/random/'+ME.username).remove();
+        currentGameId = gid;
+        enterGameScreen(gid);
+      }
+    });
+  }
+}
+
+async function cancelQuickMatch(){
+  stopPoll();
+  await db.ref('hb/queue/random/'+ME.username).remove();
+  renderLobby();
+}
+
+// ================= WAITING ROOM =================
+function renderWaiting(code){
+  showScreen('waiting');
+  stopPoll();
+  kset('hb:lastgame', {gameId: code, savedAt: Date.now()}, false);
+  activeListenerRef = db.ref(dbPath('hb:game:'+code));
+  activeListenerRef.on('value', snap=>{
+    const game = snap.exists() ? snap.val() : null;
+    if(!game) return;
+    if(game.status==='active'){ stopPoll(); enterGameScreen(code); return; }
+    drawWaiting(code, game);
+  });
+}
+
+function seatLabel(mode, key){
+  if(mode==='team'){
+    const map = {whiteBrain:'White - Brain', whiteHand:'White - Hand', blackBrain:'Black - Brain', blackHand:'Black - Hand'};
+    return map[key];
+  }
+  return key==='white' ? 'White' : 'Black';
+}
+
+function drawWaiting(code, game){
+  const el = document.getElementById('screen-waiting');
+  const seatKeys = Object.keys(game.seats);
+  const rows = seatKeys.map(k=>{
+    const occ = game.seats[k];
+    if(occ===ME.username){
+      return `<div class="seat"><span class="taken">${seatLabel(game.mode,k)} (you)</span><span class="backlink" data-leave="${k}">leave</span></div>`;
+    } else if(occ){
+      return `<div class="seat"><span class="who">${seatLabel(game.mode,k)}</span><span class="taken">${occ}</span></div>`;
+    } else {
+      return `<div class="seat"><span class="who">${seatLabel(game.mode,k)}</span><button class="secondary" data-take="${k}">Take seat</button></div>`;
+    }
+  }).join('');
+  el.innerHTML = `
+    <div class="card">
+      <h2>Waiting for players</h2>
+      <p class="desc">Share this code with your ${game.mode==='team'?'3 friends':'friend'}. Pick your seat below - the game starts once every seat is filled.</p>
+      <div class="code-display">${code}</div>
+      ${rows}
+      <div style="margin-top:12px;"><span class="backlink" id="btnLeave">Leave room</span></div>
+    </div>
+  `;
+  el.querySelectorAll('[data-take]').forEach(b=> b.onclick = ()=> takeSeat(code, b.dataset.take));
+  el.querySelectorAll('[data-leave]').forEach(b=> b.onclick = ()=> leaveSeatOnly(code, b.dataset.leave));
+  document.getElementById('btnLeave').onclick = ()=>{ stopPoll(); clearLastGame(); renderLobby(); };
+}
+
+// ================= GAME =================
+let gameState = null;
+let flipped = false;
+let clockTickTimer = null;
+
+function enterGameScreen(code){
+  currentGameId = code;
+  showScreen('game');
+  selectedSquare = null;
+  stopPoll();
+  kset('hb:lastgame', {gameId: code, savedAt: Date.now()}, false);
+  activeListenerRef = db.ref(dbPath('hb:game:'+code));
+  activeListenerRef.on('value', snap=>{
+    const g = snap.exists() ? snap.val() : null;
+    if(!g) return;
+    gameState = g;
+    const me = myRole(g);
+    flipped = me && me.side==='b';
+    drawGame();
+  });
+  clockTickTimer = setInterval(clockTick, 500);
+}
+
+function clearLastGame(){
+  kset('hb:lastgame', null, false);
+}
+
+async function clockTick(){
+  const g = gameState;
+  if(!g || g.status!=='active' || !g.clock || g.clock.initialSec<=0 || !g.clock.turnStartedAt) { drawClocksOnly(); return; }
+  const elapsed = Date.now() - g.clock.turnStartedAt;
+  const remaining = (g.turn==='w' ? g.clock.whiteMs : g.clock.blackMs) - elapsed;
+  if(remaining <= 0){
+    const fresh = await kget('hb:game:'+currentGameId, true);
+    if(fresh && fresh.status==='active'){
+      fresh.status = 'finished';
+      fresh.winner = fresh.turn==='w' ? 'b' : 'w';
+      fresh.ratingNote = 'won on time';
+      if(fresh.mode==='random'){
+        const scoreWhite = fresh.winner==='w' ? 1 : 0;
+        const change = await applyEloResult(fresh.seats.white, fresh.seats.black, scoreWhite);
+        fresh.ratingNote = `Won on time - White ${change.whiteChange>=0?'+':''}${change.whiteChange}, Black ${change.blackChange>=0?'+':''}${change.blackChange}`;
+      }
+      await kset('hb:game:'+currentGameId, fresh, true);
+    }
+    return;
+  }
+  drawClocksOnly();
+}
+
+function fmtClock(ms){
+  ms = Math.max(0, ms);
+  const totalSec = Math.ceil(ms/1000);
+  const m = Math.floor(totalSec/60);
+  const s = totalSec%60;
+  return m+':'+String(s).padStart(2,'0');
+}
+
+function drawClocksOnly(){
+  const g = gameState;
+  if(!g || !g.clock || g.clock.initialSec<=0) return;
+  const elapsed = (g.status==='active' && g.clock.turnStartedAt) ? Date.now()-g.clock.turnStartedAt : 0;
+  const wMs = g.turn==='w' ? g.clock.whiteMs - elapsed : g.clock.whiteMs;
+  const bMs = g.turn==='b' ? g.clock.blackMs - elapsed : g.clock.blackMs;
+  const wEl = document.getElementById('clockWhite');
+  const bEl = document.getElementById('clockBlack');
+  if(wEl) wEl.textContent = fmtClock(wMs);
+  if(bEl) bEl.textContent = fmtClock(bMs);
+}
+
+async function refreshGame(){
+  const g = await kget('hb:game:'+currentGameId, true);
+  if(!g) return;
+  gameState = g;
+  const me = myRole(g);
+  flipped = me && me.side==='b';
+  drawGame();
+}
+
+function myRole(g){
+  if(g.mode==='team'){
+    if(g.seats.whiteBrain===ME.username) return {side:'w', role:'brain'};
+    if(g.seats.whiteHand===ME.username) return {side:'w', role:'hand'};
+    if(g.seats.blackBrain===ME.username) return {side:'b', role:'brain'};
+    if(g.seats.blackHand===ME.username) return {side:'b', role:'hand'};
+  } else {
+    if(g.seats.white===ME.username) return {side:'w', role:'solo'};
+    if(g.seats.black===ME.username) return {side:'b', role:'solo'};
+  }
+  return null;
+}
+
+function legalTypesNow(chess){
+  const moves = chess.moves({verbose:true});
+  return [...new Set(moves.map(m=>m.piece))];
+}
+
+function allowedFromSquares(chess, announced){
+  if(!announced) return [];
+  return chess.moves({verbose:true}).filter(m=>m.piece===announced);
+}
+
+function drawGame(){
+  const g = gameState;
+  const chess = new Chess(g.fen);
+  const me = myRole(g);
+  const mySide = me ? me.side : null;
+  const myTurn = mySide === g.turn;
+  const el = document.getElementById('screen-game');
+
+  const board = chess.board();
+  const rowsOrder = flipped ? [0,1,2,3,4,5,6,7].reverse() : [0,1,2,3,4,5,6,7];
+  const colsOrder = flipped ? [0,1,2,3,4,5,6,7].reverse() : [0,1,2,3,4,5,6,7];
+
+  const allowed = allowedFromSquares(chess, g.announced);
+  const fromSquares = new Set(allowed.map(m=>m.from));
+  const destMoves = selectedSquare ? allowed.filter(m=>m.from===selectedSquare) : [];
+  const destSquares = new Set(destMoves.map(m=>m.to));
+  const captureSquares = new Set(destMoves.filter(m=>m.captured).map(m=>m.to));
+
+  const canInteract = myTurn && (
+    (g.mode==='team' && me.role==='hand' && g.announced) ||
+    (g.mode==='random' && me.role==='solo' && g.announced)
+  );
+
+  const hasClock = g.clock && g.clock.initialSec>0;
+  let clockHtml = '';
+  if(hasClock){
+    const topColor = flipped ? 'w' : 'b';
+    const botColor = flipped ? 'b' : 'w';
+    clockHtml = `
+      <div class="clock ${g.turn===topColor?'active':''}"><span class="label">${topColor==='w'?'White':'Black'}</span><span id="clock${topColor==='w'?'White':'Black'}">${fmtClock(topColor==='w'?g.clock.whiteMs:g.clock.blackMs)}</span></div>
+    `;
+  }
+  let clockHtmlBottom = '';
+  if(hasClock){
+    const botColor = flipped ? 'b' : 'w';
+    clockHtmlBottom = `
+      <div class="clock ${g.turn===botColor?'active':''}"><span class="label">${botColor==='w'?'White':'Black'}</span><span id="clock${botColor==='w'?'White':'Black'}">${fmtClock(botColor==='w'?g.clock.whiteMs:g.clock.blackMs)}</span></div>
+    `;
+  }
+
+  let checkedKingSquare = null;
+  if(chess.in_check()){
+    for(let r=0;r<8;r++){
+      for(let c=0;c<8;c++){
+        const p = board[r][c];
+        if(p && p.type==='k' && p.color===chess.turn()){ checkedKingSquare = "abcdefgh"[c]+(8-r); }
+      }
+    }
+  }
+
+  let boardHtml = '<div>';
+  boardHtml += clockHtml;
+  boardHtml += '<div class="board">';
+  for(const r of rowsOrder){
+    for(const c of colsOrder){
+      const file = "abcdefgh"[c];
+      const rank = 8-r;
+      const sq = file+rank;
+      const piece = board[r][c];
+      const isLight = (r+c)%2===0;
+      let cls = 'sq ' + (isLight?'light':'dark');
+      if(sq===selectedSquare) cls += ' from';
+      if(sq===checkedKingSquare) cls += ' in-check';
+      if(canInteract && destSquares.has(sq)){ cls += ' dest'; if(captureSquares.has(sq)) cls += ' capture'; }
+      let symbol = '';
+      if(piece){
+        const unicodeFallback = PIECE_UNICODE[piece.color][piece.type];
+        symbol = `<img class="piece-img" src="${pieceImgUrl(piece.color, piece.type)}" alt="" draggable="false" onerror="this.outerHTML='<span style=&quot;font-size:1em;line-height:1;&quot;>${unicodeFallback}</span>'">`;
+      }
+      let coordHtml = '';
+      if(c===colsOrder[0]) coordHtml += `<span class="coord rank">${rank}</span>`;
+      if(r===rowsOrder[rowsOrder.length-1]) coordHtml += `<span class="coord file">${file}</span>`;
+      boardHtml += `<div class="${cls}" data-sq="${sq}">${coordHtml}${symbol}</div>`;
+    }
+  }
+  boardHtml += '</div>';
+  boardHtml += clockHtmlBottom;
+  boardHtml += '</div>';
+
+  let panelHtml = '';
+  if(g.status==='finished'){
+    let resultText = g.winner==='draw' ? 'Draw' : (g.winner==='w'?'White wins':'Black wins');
+    panelHtml += `<div class="result-banner">${resultText}${g.ratingNote?('<div class="rc">'+g.ratingNote+'</div>'):''}</div>`;
+    panelHtml += '<button id="btnBack">Back to lobby</button>';
+  } else {
+    const legalTypes = legalTypesNow(chess);
+    panelHtml += `<div class="announce ${g.announced?'':'empty'}">${g.announced ? 'Announced: '+PIECE_NAMES[g.announced] : 'No piece announced yet'}</div>`;
+    if(!myTurn){
+      panelHtml += `<div class="status-msg">Waiting on the other side...</div>`;
+    } else if(g.mode==='team'){
+      if(me.role==='brain' && !g.announced){
+        panelHtml += '<div class="types">' + Object.keys(PIECE_NAMES).map(p=>{
+          const ok = legalTypes.includes(p);
+          return `<button data-type="${p}" ${ok?'':'disabled'}>${PIECE_NAMES[p]}</button>`;
+        }).join('') + '</div>';
+        panelHtml += `<div class="hint">Only pieces with a legal move can be announced.</div>`;
+      } else if(me.role==='brain' && g.announced){
+        panelHtml += `<div class="status-msg">Waiting for your Hand to move...</div>`;
+      } else if(me.role==='hand' && !g.announced){
+        panelHtml += `<div class="status-msg">Waiting for your Brain to announce a piece...</div>`;
+      } else if(me.role==='hand' && g.announced){
+        panelHtml += `<div class="status-msg">Click a highlighted piece, then a highlighted square.</div>`;
+      }
+    } else if(g.mode==='random'){
+      if(me.role==='solo' && !g.announced){
+        panelHtml += '<button id="btnRandomize">Randomize piece</button>';
+        panelHtml += `<div class="hint">Only picks from pieces that currently have a legal move.</div>`;
+      } else if(me.role==='solo' && g.announced){
+        panelHtml += `<div class="status-msg">Click a highlighted piece, then a highlighted square.</div>`;
+      }
+    }
+    if(!me){
+      panelHtml += `<div class="status-msg">You are spectating this game.</div>`;
+    }
+
+    if(me){
+      if(g.drawOffer && g.drawOffer!==mySide){
+        panelHtml += `<div class="draw-offer">Your opponent offers a draw.<div class="draw-offer-btns"><button id="btnAcceptDraw">Accept</button><button class="secondary" id="btnDeclineDraw">Decline</button></div></div>`;
+      } else if(g.drawOffer && g.drawOffer===mySide){
+        panelHtml += `<div class="status-msg">Draw offer sent - waiting for a response.</div>`;
+      }
+      panelHtml += `<div class="game-actions">`;
+      if(!(g.drawOffer && g.drawOffer===mySide)){
+        panelHtml += `<button class="secondary" id="btnOfferDraw">Offer draw</button>`;
+      }
+      panelHtml += `<button class="secondary danger" id="btnResign">Resign</button>`;
+      panelHtml += `</div>`;
+    }
+  }
+
+  panelHtml += '<div class="movelog">' + ((g.moveLog||[]).length ? g.moveLog.join('  ') : 'No moves yet.') + '</div>';
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="board-wrap">
+        ${boardHtml}
+        <div class="panel">${panelHtml}</div>
+      </div>
+    </div>
+  `;
+
+  if(g.status!=='finished'){
+    el.querySelectorAll('[data-type]:not([disabled])').forEach(btn=>{
+      btn.onclick = ()=> announceType(btn.dataset.type);
+    });
+    const rb = document.getElementById('btnRandomize');
+    if(rb) rb.onclick = randomizeType;
+    const resignBtn = document.getElementById('btnResign');
+    if(resignBtn) resignBtn.onclick = ()=>{ if(confirm('Resign this game?')) resignGame(mySide); };
+    const offerBtn = document.getElementById('btnOfferDraw');
+    if(offerBtn) offerBtn.onclick = ()=> offerDraw(mySide);
+    const acceptBtn = document.getElementById('btnAcceptDraw');
+    if(acceptBtn) acceptBtn.onclick = acceptDraw;
+    const declineBtn = document.getElementById('btnDeclineDraw');
+    if(declineBtn) declineBtn.onclick = declineDraw;
+    if(canInteract){
+      el.querySelectorAll('[data-sq]').forEach(cell=>{
+        cell.onclick = ()=> handleSquareClick(cell.dataset.sq, fromSquares, destSquares);
+      });
+    }
+  } else {
+    const bb = document.getElementById('btnBack');
+    if(bb) bb.onclick = ()=>{ stopPoll(); clearLastGame(); renderLobby(); };
+  }
+}
+
+async function announceType(type){
+  const g = await kget('hb:game:'+currentGameId, true);
+  if(!g || g.announced) return;
+  g.announced = type;
+  await kset('hb:game:'+currentGameId, g, true);
+  refreshGame();
+}
+
+async function randomizeType(){
+  const g = await kget('hb:game:'+currentGameId, true);
+  if(!g || g.announced) return;
+  const chess = new Chess(g.fen);
+  const types = legalTypesNow(chess);
+  if(types.length===0) return;
+  const type = types[Math.floor(Math.random()*types.length)];
+  await announceType(type);
+}
+
+function handleSquareClick(sq, fromSquares, destSquares){
+  if(!selectedSquare){
+    if(fromSquares.has(sq)){ selectedSquare = sq; drawGame(); }
+  } else {
+    if(destSquares.has(sq)){
+      makeMove(selectedSquare, sq);
+      selectedSquare = null;
+    } else if(fromSquares.has(sq)){
+      selectedSquare = sq; drawGame();
+    } else {
+      selectedSquare = null; drawGame();
+    }
+  }
+}
+
+async function finishGame(g, winner, note){
+  g.status = 'finished';
+  g.winner = winner;
+  g.ratingNote = note;
+  if(g.mode==='random'){
+    const scoreWhite = winner==='w' ? 1 : winner==='b' ? 0 : 0.5;
+    const change = await applyEloResult(g.seats.white, g.seats.black, scoreWhite);
+    g.ratingNote = `${note} - White ${change.whiteChange>=0?'+':''}${change.whiteChange}, Black ${change.blackChange>=0?'+':''}${change.blackChange}`;
+  }
+  await kset('hb:game:'+currentGameId, g, true);
+}
+
+async function resignGame(mySide){
+  const g = await kget('hb:game:'+currentGameId, true);
+  if(!g || g.status!=='active' || !mySide) return;
+  await finishGame(g, mySide==='w' ? 'b' : 'w', 'resigned');
+}
+
+async function offerDraw(mySide){
+  const g = await kget('hb:game:'+currentGameId, true);
+  if(!g || g.status!=='active' || !mySide) return;
+  g.drawOffer = mySide;
+  await kset('hb:game:'+currentGameId, g, true);
+}
+
+async function acceptDraw(){
+  const g = await kget('hb:game:'+currentGameId, true);
+  if(!g || g.status!=='active' || !g.drawOffer) return;
+  await finishGame(g, 'draw', 'draw agreed');
+}
+
+async function declineDraw(){
+  const g = await kget('hb:game:'+currentGameId, true);
+  if(!g || g.status!=='active') return;
+  g.drawOffer = "";
+  await kset('hb:game:'+currentGameId, g, true);
+}
+
+async function makeMove(from, to){
+  const g = await kget('hb:game:'+currentGameId, true);
+  if(!g) return;
+  const chess = new Chess(g.fen);
+  const moverColor = chess.turn();
+  const mv = chess.move({from, to, promotion:'q'});
+  if(!mv) return;
+  g.fen = chess.fen();
+  g.turn = chess.turn();
+  g.announced = null;
+  g.drawOffer = "";
+  g.moveLog = g.moveLog || [];
+  g.moveLog.push(mv.san);
+
+  if(g.clock && g.clock.initialSec>0 && g.clock.turnStartedAt){
+    const elapsed = Date.now() - g.clock.turnStartedAt;
+    const incMs = g.clock.incrementSec*1000;
+    if(moverColor==='w') g.clock.whiteMs = Math.max(0, g.clock.whiteMs - elapsed) + incMs;
+    else g.clock.blackMs = Math.max(0, g.clock.blackMs - elapsed) + incMs;
+    g.clock.turnStartedAt = Date.now();
+  }
+
+  if(chess.game_over()){
+    g.status = 'finished';
+    if(chess.in_checkmate()){ g.winner = mv.color; }
+    else { g.winner = 'draw'; }
+    if(g.mode==='random'){
+      const scoreWhite = g.winner==='w' ? 1 : g.winner==='b' ? 0 : 0.5;
+      const change = await applyEloResult(g.seats.white, g.seats.black, scoreWhite);
+      g.ratingNote = `White ${change.whiteChange>=0?'+':''}${change.whiteChange}, Black ${change.blackChange>=0?'+':''}${change.blackChange}`;
+    }
+  }
+
+  await kset('hb:game:'+currentGameId, g, true);
+  refreshGame();
+}
+
+// ================= INIT =================
+(async function init(){
+  const loggedIn = await ensureUser();
+  if(!loggedIn){ renderAuthScreen(); return; }
+  await afterAuth();
+})();
+
+async function afterAuth(){
+  const last = await kget('hb:lastgame', false);
+  if(last && last.gameId && (Date.now()-last.savedAt) < 12*60*60*1000){
+    const g = await kget('hb:game:'+last.gameId, true);
+    if(g && g.status==='active' && myRoleForUser(g, ME.username)){
+      currentGameId = last.gameId;
+      enterGameScreen(last.gameId);
+      return;
+    } else if(g && g.status==='waiting'){
+      currentGameId = last.gameId;
+      renderWaiting(last.gameId);
+      return;
+    } else {
+      clearLastGame();
+    }
+  }
+  renderLobby();
+}
+
+function myRoleForUser(g, username){
+  if(g.mode==='team'){
+    return Object.values(g.seats).includes(username);
+  }
+  return g.seats.white===username || g.seats.black===username;
+}
+</script>
+</body>
+</html>
