@@ -20,6 +20,8 @@ body{
 }
 .wrap{max-width:1060px;margin:0 auto;}
 #screen-lobby .card, #screen-waiting .card{max-width:640px;}
+#screen-auth{display:flex;justify-content:center;padding-top:6vh;}
+#screen-auth .card{max-width:380px;width:100%;}
 h1{font-size:24px;font-weight:700;letter-spacing:-0.5px;}
 .sub{color:#7a766c;font-size:13.5px;margin-top:4px;}
 header{display:flex;justify-content:space-between;align-items:center;margin-bottom:36px;}
@@ -50,7 +52,7 @@ button:hover{background:#18594a;}
 button.secondary{background:#efe9db;color:#22201b;}
 button.secondary:hover{background:#e4ddcb;}
 button:disabled{opacity:0.5;cursor:default;}
-input[type=text]{
+input[type=text], input[type=email], input[type=password]{
   border:1px solid #d8d1bf;
   border-radius:7px;
   padding:10px 12px;
@@ -92,6 +94,16 @@ input[type=text]{
 .seat .who{color:#7a766c;}
 .seat .taken{font-weight:600;color:#22201b;}
 .board-wrap{display:flex;gap:36px;flex-wrap:wrap;align-items:flex-start;}
+.lobby-grid{display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start;}
+@media (max-width:760px){ .lobby-grid{grid-template-columns:1fr;} }
+.account-card{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.account-card .account-name{font-size:17px;font-weight:700;}
+.account-card .account-rating{color:#7a766c;font-size:13px;margin-top:4px;}
+.lb-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;font-size:13px;border-bottom:1px solid #efe9db;}
+.lb-row:last-child{border-bottom:none;}
+.lb-row .lb-rank{color:#a19c8c;width:22px;flex-shrink:0;}
+.lb-row .lb-name{flex:1;color:#3a362c;}
+.lb-row .lb-rating{font-weight:600;color:#22201b;}
 :root{ --sq: clamp(30px, 9vw, 84px); }
 .board{
   display:grid;grid-template-columns:repeat(8,var(--sq));grid-template-rows:repeat(8,var(--sq));
@@ -128,10 +140,16 @@ input[type=text]{
 .announce.empty{background:#efe9db;color:#7a766c;font-weight:600;}
 .types{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;}
 .status-msg{font-size:13.5px;color:#7a766c;margin-bottom:14px;line-height:1.6;}
-.movelog{
-  font-size:12.5px;color:#5a564c;max-height:140px;overflow-y:auto;
-  border-top:1px solid #e4ddcf;padding-top:12px;margin-top:14px;line-height:1.8;
+.movelog-wrap{
+  max-height:180px;overflow-y:auto;
+  border-top:1px solid #e4ddcf;padding-top:8px;margin-top:14px;
 }
+.movelog-wrap.empty{font-size:12.5px;color:#7a766c;padding-top:12px;}
+.move-row{display:grid;grid-template-columns:28px 1fr 1fr;font-size:13px;}
+.move-row:nth-child(odd){background:#f7f4ec;}
+.move-num{color:#a19c8c;padding:5px 4px;font-size:11.5px;display:flex;align-items:center;}
+.move-white,.move-black{padding:5px 8px;border-radius:4px;color:#3a362c;}
+.move-white.current,.move-black.current{background:#dfe9f5;color:#1f4d7a;font-weight:600;}
 .result-banner{
   background:#22201b;color:#fff;padding:18px;border-radius:8px;text-align:center;margin-bottom:18px;
 }
@@ -188,6 +206,35 @@ button.danger:hover{background:#fbecec;}
 
 <script>
 const PIECE_NAMES = {p:"Pawn",n:"Knight",b:"Bishop",r:"Rook",q:"Queen",k:"King"};
+
+const FIGURINE = {
+  w: {N:'♘',B:'♗',R:'♖',Q:'♕',K:'♔'},
+  b: {N:'♞',B:'♝',R:'♜',Q:'♛',K:'♚'}
+};
+function sanToFigurine(san, color){
+  if(!san) return '';
+  const map = FIGURINE[color];
+  return san
+    .replace(/^([NBRQK])/, (m,p)=>map[p]||p)
+    .replace(/=([NBRQK])/, (m,p)=>'='+(map[p]||p));
+}
+function renderMoveLog(moveLog){
+  if(!moveLog || !moveLog.length) return '<div class="movelog-wrap empty">No moves yet.</div>';
+  let rows = '';
+  for(let i=0;i<moveLog.length;i+=2){
+    const num = i/2+1;
+    const isLastWhite = i===moveLog.length-1;
+    const isLastBlack = i+1===moveLog.length-1;
+    const whiteSan = sanToFigurine(moveLog[i], 'w');
+    const blackSan = moveLog[i+1]!==undefined ? sanToFigurine(moveLog[i+1], 'b') : '';
+    rows += `<div class="move-row">` +
+      `<span class="move-num">${num}</span>` +
+      `<span class="move-white${isLastWhite?' current':''}">${whiteSan}</span>` +
+      `<span class="move-black${isLastBlack?' current':''}">${blackSan}</span>` +
+    `</div>`;
+  }
+  return `<div class="movelog-wrap">${rows}</div>`;
+}
 const PIECE_UNICODE = {
   w:{p:"\u2659",n:"\u2658",b:"\u2657",r:"\u2656",q:"\u2655",k:"\u2654"},
   b:{p:"\u265F",n:"\u265E",b:"\u265D",r:"\u265C",q:"\u265B",k:"\u265A"}
@@ -231,6 +278,7 @@ let ME = null;
 let currentGameId = null;
 let pollTimer = null;
 let selectedSquare = null;
+let pendingPromotion = null;
 
 function genCode(){
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -381,23 +429,36 @@ async function renderLeaderboard(){
   stopPoll();
   showScreen('leaderboard');
   const el = document.getElementById('screen-leaderboard');
-  el.innerHTML = '<div class="card"><h2>Leaderboard</h2><p class="desc">Loading...</p></div>';
-  const snap = await db.ref('hb/leaderboard').once('value');
-  const users = snap.exists() ? snap.val() : {};
-  const rows = Object.keys(users)
-    .map(u=>({username:u, rating:users[u].rating||1200, games:users[u].games||0}))
-    .filter(u=>u.games>0)
-    .sort((a,b)=>b.rating-a.rating)
-    .slice(0,50);
-  const rowsHtml = rows.length ? rows.map((u,i)=>`
+  const backLink = '<div style="margin-top:14px;"><span class="backlink" id="btnBackFromLb">Back to lobby</span></div>';
+  el.innerHTML = `<div class="card"><h2>Leaderboard</h2><p class="desc">Loading...</p>${backLink}</div>`;
+  document.getElementById('btnBackFromLb').onclick = renderLobby;
+
+  let rows = [];
+  let loadError = false;
+  try{
+    const snap = await db.ref('hb/leaderboard').once('value');
+    const users = snap.exists() ? snap.val() : {};
+    rows = Object.keys(users)
+      .map(u=>({username:u, rating:users[u].rating||1200, games:users[u].games||0}))
+      .filter(u=>u.games>0)
+      .sort((a,b)=>b.rating-a.rating)
+      .slice(0,50);
+  } catch(e){
+    console.error(e);
+    loadError = true;
+  }
+
+  const rowsHtml = loadError
+    ? '<p class="desc">Could not load the leaderboard right now - try again in a moment.</p>'
+    : (rows.length ? rows.map((u,i)=>`
     <div class="seat"><span class="who">#${i+1} ${u.username}${u.username===ME.username?' (you)':''}</span><span class="taken">${u.rating} &middot; ${u.games} games</span></div>
-  `).join('') : '<p class="desc">No rated games played yet - play a Quick match to get on the board.</p>';
+  `).join('') : '<p class="desc">No rated games played yet - play a Quick match to get on the board.</p>');
   el.innerHTML = `
     <div class="card">
       <h2>Leaderboard</h2>
       <p class="desc">Ranked by rating. Only rated (Quick match) games count.</p>
       ${rowsHtml}
-      <div style="margin-top:14px;"><span class="backlink" id="btnBackFromLb">Back to lobby</span></div>
+      ${backLink}
     </div>
   `;
   document.getElementById('btnBackFromLb').onclick = renderLobby;
@@ -482,32 +543,43 @@ function renderLobby(){
   const el = document.getElementById('screen-lobby');
   const tcButtons = TIME_CONTROLS.map(t=>`<div class="tcbtn ${selectedTC===t.key?'active':''}" data-tc="${t.key}">${t.label}</div>`).join('');
   el.innerHTML = `
-    <div class="card" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
-      <div>
-        <h2 style="margin-bottom:2px;">Leaderboard</h2>
-        <p class="desc" style="margin-bottom:0;">See how you rank against everyone else.</p>
+    <div class="lobby-grid">
+      <div class="lobby-main">
+        <div class="card">
+          <h2>Quick match</h2>
+          <p class="desc">1v1, random-button mode. Get matched with someone else looking to play right now. Rated.</p>
+          <div class="tc-row">${tcButtons}</div>
+          <button id="btnQuick">Find opponent</button>
+          <div class="hint" id="quickHint"></div>
+        </div>
+        <div class="card">
+          <h2>Play with friends</h2>
+          <p class="desc">Create a room and share the code, or join one someone gave you.</p>
+          <div class="modes">
+            <div class="modebtn ${createMode==='team'?'active':''}" data-mode="team">Team (4 players)<div class="hint">2 per side: Brain names a piece, Hand moves it</div></div>
+            <div class="modebtn ${createMode==='random'?'active':''}" data-mode="random">Random-button (2 players)<div class="hint">Each turn, hit Randomize for your piece type</div></div>
+          </div>
+          <div class="tc-row">${tcButtons.replace(/data-tc/g,'data-tc2')}</div>
+          <button id="btnCreate">Create room</button>
+          <div style="margin-top:14px;" class="row">
+            <input type="text" id="joinCode" placeholder="room code" maxlength="5">
+            <button class="secondary" id="btnJoin">Join</button>
+          </div>
+        </div>
       </div>
-      <button class="secondary" id="btnLobbyLeaderboard">View</button>
-    </div>
-    <div class="card">
-      <h2>Quick match</h2>
-      <p class="desc">1v1, random-button mode. Get matched with someone else looking to play right now. Rated.</p>
-      <div class="tc-row">${tcButtons}</div>
-      <button id="btnQuick">Find opponent</button>
-      <div class="hint" id="quickHint"></div>
-    </div>
-    <div class="card">
-      <h2>Play with friends</h2>
-      <p class="desc">Create a room and share the code, or join one someone gave you.</p>
-      <div class="modes">
-        <div class="modebtn ${createMode==='team'?'active':''}" data-mode="team">Team (4 players)<div class="hint">2 per side: Brain names a piece, Hand moves it</div></div>
-        <div class="modebtn ${createMode==='random'?'active':''}" data-mode="random">Random-button (2 players)<div class="hint">Each turn, hit Randomize for your piece type</div></div>
-      </div>
-      <div class="tc-row">${tcButtons.replace(/data-tc/g,'data-tc2')}</div>
-      <button id="btnCreate">Create room</button>
-      <div style="margin-top:14px;" class="row">
-        <input type="text" id="joinCode" placeholder="room code" maxlength="5">
-        <button class="secondary" id="btnJoin">Join</button>
+      <div class="lobby-side">
+        <div class="card account-card">
+          <div>
+            <div class="account-name">${ME.username}</div>
+            <div class="account-rating" id="lobbyAccountLine">rating - &middot; - games</div>
+          </div>
+          <span class="backlink" id="lobbyLogout">Log out</span>
+        </div>
+        <div class="card">
+          <h2>Leaderboard</h2>
+          <div id="lobbyLbPreview" class="desc">Loading...</div>
+          <div style="margin-top:12px;"><span class="backlink" id="lobbyViewLb">View full leaderboard</span></div>
+        </div>
       </div>
     </div>
   `;
@@ -523,7 +595,41 @@ function renderLobby(){
     if(code) joinRoom(code);
   };
   document.getElementById('btnQuick').onclick = quickMatch;
-  document.getElementById('btnLobbyLeaderboard').onclick = renderLeaderboard;
+  document.getElementById('lobbyLogout').onclick = logout;
+  document.getElementById('lobbyViewLb').onclick = renderLeaderboard;
+  loadLobbySidebar();
+}
+
+async function loadLobbySidebar(){
+  const profile = await kget('hb:leaderboard:'+ME.username, true) || {rating:1200, games:0};
+  const line = document.getElementById('lobbyAccountLine');
+  if(line) line.textContent = 'rating '+profile.rating+' \u00b7 '+profile.games+' games';
+
+  const preview = document.getElementById('lobbyLbPreview');
+  if(!preview) return;
+  try{
+    const snap = await db.ref('hb/leaderboard').once('value');
+    const users = snap.exists() ? snap.val() : {};
+    const rows = Object.keys(users)
+      .map(u=>({username:u, rating:users[u].rating||1200, games:users[u].games||0}))
+      .filter(u=>u.games>0)
+      .sort((a,b)=>b.rating-a.rating)
+      .slice(0,5);
+    const el2 = document.getElementById('lobbyLbPreview');
+    if(!el2) return;
+    if(!rows.length){
+      el2.className = 'desc';
+      el2.innerHTML = 'No rated games played yet.';
+    } else {
+      el2.className = '';
+      el2.innerHTML = rows.map((u,i)=>`
+        <div class="lb-row"><span class="lb-rank">#${i+1}</span><span class="lb-name">${u.username}${u.username===ME.username?' (you)':''}</span><span class="lb-rating">${u.rating}</span></div>
+      `).join('');
+    }
+  } catch(e){
+    const el2 = document.getElementById('lobbyLbPreview');
+    if(el2){ el2.className = 'desc'; el2.innerHTML = 'Could not load right now.'; }
+  }
 }
 
 function freshClock(tcKey){
@@ -572,7 +678,6 @@ async function takeSeat(code, seatKey){
   game.seats[seatKey] = ME.username;
   if(allSeatsFilled(game)){
     game.status = 'active';
-    if(game.clock && game.clock.initialSec>0) game.clock.turnStartedAt = Date.now();
     if(game.mode==='random'){
       const wp = await kget('hb:leaderboard:'+game.seats.white, true) || {rating:1200, games:0};
       const bp = await kget('hb:leaderboard:'+game.seats.black, true) || {rating:1200, games:0};
@@ -602,7 +707,6 @@ async function quickMatch(){
     const code = genCode();
     const iAmWhite = Math.random() < 0.5;
     const clock = freshClock(selectedTC);
-    if(clock.initialSec>0) clock.turnStartedAt = Date.now();
     const myProfile = await kget('hb:leaderboard:'+ME.username, true) || {rating:1200, games:0};
     const oppProfile = await kget('hb:leaderboard:'+candidate, true) || {rating:1200, games:0};
     const game = {
@@ -697,6 +801,9 @@ function enterGameScreen(code){
   selectedSquare = null;
   stopPoll();
   kset('hb:lastgame', {gameId: code, savedAt: Date.now()}, false);
+  gameState = null;
+  selectedSquare = null;
+  pendingPromotion = null;
   activeListenerRef = db.ref(dbPath('hb:game:'+code));
   activeListenerRef.on('value', snap=>{
     const g = snap.exists() ? snap.val() : null;
@@ -875,6 +982,13 @@ function drawGame(){
     }
     panelHtml += `<div class="result-banner">${resultText}${extra}</div>`;
     panelHtml += '<button id="btnBack">Back to lobby</button>';
+  } else if(pendingPromotion){
+    const promoNames = {q:'Queen', r:'Rook', b:'Bishop', n:'Knight'};
+    panelHtml += `<div class="hint" style="margin-bottom:10px;">Promote to:</div>`;
+    panelHtml += '<div class="types">' + Object.keys(promoNames).map(p=>
+      `<button data-promo="${p}">${promoNames[p]}</button>`
+    ).join('') + '</div>';
+    panelHtml += `<button class="secondary" id="btnCancelPromo" style="margin-top:10px;">Cancel</button>`;
   } else {
     const legalTypes = legalTypesNow(chess);
     panelHtml += `<div class="announce ${g.announced?'':'empty'}">${g.announced ? 'Announced: '+PIECE_NAMES[g.announced] : 'No piece announced yet'}</div>`;
@@ -921,7 +1035,7 @@ function drawGame(){
     }
   }
 
-  panelHtml += '<div class="movelog">' + ((g.moveLog||[]).length ? g.moveLog.join('  ') : 'No moves yet.') + '</div>';
+  panelHtml += renderMoveLog(g.moveLog);
 
   el.innerHTML = `
     <div class="card">
@@ -946,9 +1060,19 @@ function drawGame(){
     if(acceptBtn) acceptBtn.onclick = acceptDraw;
     const declineBtn = document.getElementById('btnDeclineDraw');
     if(declineBtn) declineBtn.onclick = declineDraw;
-    if(canInteract){
+    el.querySelectorAll('[data-promo]').forEach(btn=>{
+      btn.onclick = ()=>{
+        const pp = pendingPromotion;
+        pendingPromotion = null;
+        selectedSquare = null;
+        if(pp) makeMove(pp.from, pp.to, btn.dataset.promo);
+      };
+    });
+    const cancelPromoBtn = document.getElementById('btnCancelPromo');
+    if(cancelPromoBtn) cancelPromoBtn.onclick = ()=>{ pendingPromotion = null; selectedSquare = null; drawGame(); };
+    if(canInteract && !pendingPromotion){
       el.querySelectorAll('[data-sq]').forEach(cell=>{
-        cell.onclick = ()=> handleSquareClick(cell.dataset.sq, fromSquares, destSquares);
+        cell.onclick = ()=> handleSquareClick(cell.dataset.sq, fromSquares, destSquares, destMoves);
       });
     }
   } else {
@@ -969,19 +1093,28 @@ async function randomizeType(){
   const g = await kget('hb:game:'+currentGameId, true);
   if(!g || g.announced) return;
   const chess = new Chess(g.fen);
-  const types = legalTypesNow(chess);
-  if(types.length===0) return;
-  const type = types[Math.floor(Math.random()*types.length)];
+  const moves = chess.moves({verbose:true});
+  if(moves.length===0) return;
+  // Weighted by move count per type - a rook with one legal move shouldn't be
+  // as likely to get picked as a pawn with eight.
+  const type = moves[Math.floor(Math.random()*moves.length)].piece;
   await announceType(type);
 }
 
-function handleSquareClick(sq, fromSquares, destSquares){
+function handleSquareClick(sq, fromSquares, destSquares, destMoves){
+  if(pendingPromotion) return;
   if(!selectedSquare){
     if(fromSquares.has(sq)){ selectedSquare = sq; drawGame(); }
   } else {
     if(destSquares.has(sq)){
-      makeMove(selectedSquare, sq);
-      selectedSquare = null;
+      const promo = destMoves.find(m=>m.to===sq && m.promotion);
+      if(promo){
+        pendingPromotion = {from:selectedSquare, to:sq, color:promo.color};
+        drawGame();
+      } else {
+        makeMove(selectedSquare, sq);
+        selectedSquare = null;
+      }
     } else if(fromSquares.has(sq)){
       selectedSquare = sq; drawGame();
     } else {
@@ -1023,12 +1156,12 @@ async function declineDraw(){
   await kset('hb:game:'+currentGameId, g, true);
 }
 
-async function makeMove(from, to){
+async function makeMove(from, to, promotion){
   const g = await kget('hb:game:'+currentGameId, true);
   if(!g) return;
   const chess = new Chess(g.fen);
   const moverColor = chess.turn();
-  const mv = chess.move({from, to, promotion:'q'});
+  const mv = chess.move({from, to, promotion: promotion || 'q'});
   if(!mv) return;
   g.fen = chess.fen();
   g.turn = chess.turn();
@@ -1037,11 +1170,13 @@ async function makeMove(from, to){
   g.moveLog = g.moveLog || [];
   g.moveLog.push(mv.san);
 
-  if(g.clock && g.clock.initialSec>0 && g.clock.turnStartedAt){
-    const elapsed = Date.now() - g.clock.turnStartedAt;
-    const incMs = g.clock.incrementSec*1000;
-    if(moverColor==='w') g.clock.whiteMs = Math.max(0, g.clock.whiteMs - elapsed) + incMs;
-    else g.clock.blackMs = Math.max(0, g.clock.blackMs - elapsed) + incMs;
+  if(g.clock && g.clock.initialSec>0){
+    if(g.clock.turnStartedAt){
+      const elapsed = Date.now() - g.clock.turnStartedAt;
+      const incMs = g.clock.incrementSec*1000;
+      if(moverColor==='w') g.clock.whiteMs = Math.max(0, g.clock.whiteMs - elapsed) + incMs;
+      else g.clock.blackMs = Math.max(0, g.clock.blackMs - elapsed) + incMs;
+    }
     g.clock.turnStartedAt = Date.now();
   }
 
