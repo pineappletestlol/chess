@@ -7,6 +7,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -209,6 +210,7 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
+const auth = firebase.auth();
 
 function dbPath(key){ return key.replace(/:/g, '/'); }
 
@@ -220,10 +222,9 @@ async function kget(key, shared){
 }
 async function kset(key, value, shared){
   if(shared === false){
-    try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e){}
-    return;
+    try{ localStorage.setItem(key, JSON.stringify(value)); return true; }catch(e){ return false; }
   }
-  try{ await db.ref(dbPath(key)).set(value); }catch(e){ console.error(e); }
+  try{ await db.ref(dbPath(key)).set(value); return true; }catch(e){ console.error(e); return false; }
 }
 
 let ME = null;
@@ -238,24 +239,32 @@ function genCode(){
   return c;
 }
 
-async function sha256Hex(str){
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
-}
+let signingUp = false;
 
-// Returns true if a saved session matched a real account and ME got set.
-async function ensureUser(){
-  const session = await kget('hb:session', false);
-  if(session && session.username){
-    const hash = await kget('hb:account:'+session.username+':passwordHash', true);
-    if(hash){
-      ME = {username: session.username};
-      const profile = await kget('hb:leaderboard:'+session.username, true) || {rating:1200, games:0};
-      renderUserbox(profile);
-      return true;
-    }
+auth.onAuthStateChanged(async (user)=>{
+  if(signingUp) return; // doSignup drives its own flow while the account is being assembled
+  stopPoll();
+  if(user){
+    await handleSignedIn(user);
+  } else {
+    ME = null;
+    currentGameId = null;
+    document.getElementById('userbox').innerHTML = '';
+    authMode = 'login';
+    renderAuthScreen();
   }
-  return false;
+});
+
+async function handleSignedIn(user){
+  const username = await kget('hb:usernameByUid:'+user.uid, true);
+  if(!username){
+    renderAuthScreen('Something went wrong finishing your signup - please try again.');
+    return;
+  }
+  ME = {username};
+  const profile = await kget('hb:leaderboard:'+username, true) || {rating:1200, games:0};
+  renderUserbox(profile);
+  await afterAuth();
 }
 
 function renderUserbox(profile){
@@ -271,16 +280,24 @@ function renderUserbox(profile){
 
 async function logout(){
   stopPoll();
-  await kset('hb:session', null, false);
-  ME = null;
   currentGameId = null;
   document.getElementById('userbox').innerHTML = '';
-  authMode = 'login';
-  renderAuthScreen();
+  await auth.signOut();
+  // onAuthStateChanged picks this up and shows the login screen.
 }
 
 // ================= AUTH =================
 let authMode = 'login';
+
+function friendlyAuthError(e){
+  const code = e && e.code;
+  if(code==='auth/email-already-in-use') return 'That email is already registered - try logging in.';
+  if(code==='auth/invalid-email') return 'Enter a valid email.';
+  if(code==='auth/weak-password') return 'Password needs at least 6 characters.';
+  if(code==='auth/user-not-found' || code==='auth/wrong-password' || code==='auth/invalid-credential') return 'Wrong email or password.';
+  if(code==='auth/too-many-requests') return 'Too many attempts - try again in a bit.';
+  return 'Something went wrong. Please try again.';
+}
 
 function renderAuthScreen(err){
   showScreen('auth');
@@ -288,11 +305,11 @@ function renderAuthScreen(err){
   el.innerHTML = `
     <div class="card">
       <h2>${authMode==='login' ? 'Log in' : 'Create an account'}</h2>
-      <p class="desc">${authMode==='login' ? 'Welcome back.' : 'Just a username, email and password - no profile setup needed.'}</p>
+      <p class="desc">${authMode==='login' ? 'Log in with your email.' : 'Pick a username, verify with your email, and you are set.'}</p>
       ${err ? '<div class="draw-offer" style="color:#b8433f;">'+err+'</div>' : ''}
       <div class="row" style="flex-direction:column;align-items:stretch;gap:10px;">
-        <input type="text" id="authUsername" placeholder="username" autocomplete="username">
-        ${authMode==='signup' ? '<input type="text" id="authEmail" placeholder="email" autocomplete="email">' : ''}
+        ${authMode==='signup' ? '<input type="text" id="authUsername" placeholder="username" autocomplete="username">' : ''}
+        <input type="email" id="authEmail" placeholder="email" autocomplete="email">
         <input type="password" id="authPassword" placeholder="password" autocomplete="${authMode==='login'?'current-password':'new-password'}">
       </div>
       <div style="margin-top:16px;display:flex;gap:10px;">
@@ -314,33 +331,49 @@ async function doSignup(){
   const password = document.getElementById('authPassword').value;
   if(!username || !email || !password){ renderAuthScreen('Fill in all fields.'); return; }
   if(!/^[A-Za-z0-9_]{3,20}$/.test(username)){ renderAuthScreen('Username: 3-20 letters, numbers or underscores.'); return; }
-  if(!/^\S+@\S+\.\S+$/.test(email)){ renderAuthScreen('Enter a valid email.'); return; }
   if(password.length < 6){ renderAuthScreen('Password needs at least 6 characters.'); return; }
-  const existingHash = await kget('hb:account:'+username+':passwordHash', true);
-  if(existingHash){ renderAuthScreen('That username is taken.'); return; }
-  const passwordHash = await sha256Hex(password);
-  await kset('hb:account:'+username, {passwordHash, email}, true);
+
+  const taken = await kget('hb:account:'+username+':uid', true);
+  if(taken){ renderAuthScreen('That username is taken.'); return; }
+
+  signingUp = true;
+  let cred;
+  try{
+    cred = await auth.createUserWithEmailAndPassword(email, password);
+  } catch(e){
+    signingUp = false;
+    renderAuthScreen(friendlyAuthError(e));
+    return;
+  }
+  const uid = cred.user.uid;
+  const claimed = await kset('hb:account:'+username, {uid}, true);
+  if(!claimed){
+    // Someone else grabbed the username in the split second between our check and this write.
+    try{ await cred.user.delete(); }catch(e){}
+    signingUp = false;
+    await auth.signOut().catch(()=>{});
+    renderAuthScreen('That username is taken.');
+    return;
+  }
+  await kset('hb:usernameByUid:'+uid, username, true);
   const profile = {rating:1200, games:0};
   await kset('hb:leaderboard:'+username, profile, true);
-  await kset('hb:session', {username}, false);
   ME = {username};
   renderUserbox(profile);
+  signingUp = false;
   await afterAuth();
 }
 
 async function doLogin(){
-  const username = document.getElementById('authUsername').value.trim();
+  const email = document.getElementById('authEmail').value.trim();
   const password = document.getElementById('authPassword').value;
-  if(!username || !password){ renderAuthScreen('Fill in all fields.'); return; }
-  const storedHash = await kget('hb:account:'+username+':passwordHash', true);
-  if(!storedHash){ renderAuthScreen('No account with that username.'); return; }
-  const passwordHash = await sha256Hex(password);
-  if(storedHash !== passwordHash){ renderAuthScreen('Wrong password.'); return; }
-  await kset('hb:session', {username}, false);
-  ME = {username};
-  const profile = await kget('hb:leaderboard:'+username, true) || {rating:1200, games:0};
-  renderUserbox(profile);
-  await afterAuth();
+  if(!email || !password){ renderAuthScreen('Fill in all fields.'); return; }
+  try{
+    await auth.signInWithEmailAndPassword(email, password);
+    // onAuthStateChanged -> handleSignedIn takes it from here.
+  } catch(e){
+    renderAuthScreen(friendlyAuthError(e));
+  }
 }
 
 // ================= LEADERBOARD =================
@@ -371,17 +404,46 @@ async function renderLeaderboard(){
 }
 
 function expectedScore(ra, rb){ return 1/(1+Math.pow(10,(rb-ra)/400)); }
-async function applyEloResult(whiteUser, blackUser, scoreWhite){
-  const pw = await kget('hb:leaderboard:'+whiteUser, true) || {rating:1200, games:0};
-  const pb = await kget('hb:leaderboard:'+blackUser, true) || {rating:1200, games:0};
+
+function computeEloChange(myRating, oppRating, myScore){
   const K = 32;
-  const ew = expectedScore(pw.rating, pb.rating);
-  const eb = 1 - ew;
-  const newW = Math.round(pw.rating + K*(scoreWhite - ew));
-  const newB = Math.round(pb.rating + K*((1-scoreWhite) - eb));
-  await kset('hb:leaderboard:'+whiteUser, {rating:newW, games:pw.games+1}, true);
-  await kset('hb:leaderboard:'+blackUser, {rating:newB, games:pb.games+1}, true);
-  return {whiteChange:newW-pw.rating, blackChange:newB-pb.rating};
+  const expected = expectedScore(myRating, oppRating);
+  return Math.round(myRating + K*(myScore - expected)) - myRating;
+}
+
+function scoreForSide(winner, side){
+  if(winner==='draw') return 0.5;
+  return winner===side ? 1 : 0;
+}
+
+// Each client applies ONLY its own rating change - the leaderboard write rule only
+// allows a user to write their own entry, so there's no way for one client to write
+// both sides' ratings anymore (which is what used to make it forgeable).
+let myRatingChangeCache = {};
+
+async function settleMyRating(g){
+  if(!g || g.mode!=='random' || g.status!=='finished' || !g.ratingSnapshot) return;
+  const me = myRole(g);
+  if(!me) return;
+  const side = me.side;
+  if(myRatingChangeCache[currentGameId]) return;
+  if(g.ratingApplied && g.ratingApplied[side]) return;
+  const myStart = side==='w' ? g.ratingSnapshot.white : g.ratingSnapshot.black;
+  const oppStart = side==='w' ? g.ratingSnapshot.black : g.ratingSnapshot.white;
+  const myScore = scoreForSide(g.winner, side);
+  const change = computeEloChange(myStart, oppStart, myScore);
+  const myUsername = ME.username;
+  const myProfile = await kget('hb:leaderboard:'+myUsername, true) || {rating:myStart, games:0};
+  const newRating = myProfile.rating + change;
+  myRatingChangeCache[currentGameId] = {change, newRating};
+  await kset('hb:leaderboard:'+myUsername, {rating:newRating, games:myProfile.games+1}, true);
+  const fresh = await kget('hb:game:'+currentGameId, true);
+  if(fresh){
+    fresh.ratingApplied = fresh.ratingApplied || {};
+    fresh.ratingApplied[side] = true;
+    await kset('hb:game:'+currentGameId, fresh, true);
+  }
+  drawGame();
 }
 
 function showScreen(name){
@@ -511,6 +573,11 @@ async function takeSeat(code, seatKey){
   if(allSeatsFilled(game)){
     game.status = 'active';
     if(game.clock && game.clock.initialSec>0) game.clock.turnStartedAt = Date.now();
+    if(game.mode==='random'){
+      const wp = await kget('hb:leaderboard:'+game.seats.white, true) || {rating:1200, games:0};
+      const bp = await kget('hb:leaderboard:'+game.seats.black, true) || {rating:1200, games:0};
+      game.ratingSnapshot = {white:wp.rating, black:bp.rating};
+    }
   }
   await kset('hb:game:'+code, game, true);
 }
@@ -536,10 +603,13 @@ async function quickMatch(){
     const iAmWhite = Math.random() < 0.5;
     const clock = freshClock(selectedTC);
     if(clock.initialSec>0) clock.turnStartedAt = Date.now();
+    const myProfile = await kget('hb:leaderboard:'+ME.username, true) || {rating:1200, games:0};
+    const oppProfile = await kget('hb:leaderboard:'+candidate, true) || {rating:1200, games:0};
     const game = {
       mode:'random', status:'active', fen:new Chess().fen(), turn:'w', announced:null,
       moveLog:[], winner:null, drawOffer:"", clock:clock,
-      seats: iAmWhite ? {white:ME.username, black:candidate} : {white:candidate, black:ME.username}
+      seats: iAmWhite ? {white:ME.username, black:candidate} : {white:candidate, black:ME.username},
+      ratingSnapshot: iAmWhite ? {white:myProfile.rating, black:oppProfile.rating} : {white:oppProfile.rating, black:myProfile.rating}
     };
     await kset('hb:game:'+code, game, true);
     await db.ref('hb/queue/random/'+candidate+'/gameId').set(code);
@@ -635,6 +705,7 @@ function enterGameScreen(code){
     const me = myRole(g);
     flipped = me && me.side==='b';
     drawGame();
+    if(g.status==='finished' && g.mode==='random'){ settleMyRating(g); }
   });
   clockTickTimer = setInterval(clockTick, 500);
 }
@@ -653,12 +724,7 @@ async function clockTick(){
     if(fresh && fresh.status==='active'){
       fresh.status = 'finished';
       fresh.winner = fresh.turn==='w' ? 'b' : 'w';
-      fresh.ratingNote = 'won on time';
-      if(fresh.mode==='random'){
-        const scoreWhite = fresh.winner==='w' ? 1 : 0;
-        const change = await applyEloResult(fresh.seats.white, fresh.seats.black, scoreWhite);
-        fresh.ratingNote = `Won on time - White ${change.whiteChange>=0?'+':''}${change.whiteChange}, Black ${change.blackChange>=0?'+':''}${change.blackChange}`;
-      }
+      fresh.statusNote = 'won on time';
       await kset('hb:game:'+currentGameId, fresh, true);
     }
     return;
@@ -800,7 +866,14 @@ function drawGame(){
   let panelHtml = '';
   if(g.status==='finished'){
     let resultText = g.winner==='draw' ? 'Draw' : (g.winner==='w'?'White wins':'Black wins');
-    panelHtml += `<div class="result-banner">${resultText}${g.ratingNote?('<div class="rc">'+g.ratingNote+'</div>'):''}</div>`;
+    let extra = '';
+    if(g.statusNote) extra += '<div class="rc">'+g.statusNote+'</div>';
+    if(g.mode==='random'){
+      const rc = myRatingChangeCache[currentGameId];
+      if(rc) extra += `<div class="rc">You: ${rc.change>=0?'+':''}${rc.change} (now ${rc.newRating})</div>`;
+      else if(myRole(g)) extra += '<div class="rc">Updating rating...</div>';
+    }
+    panelHtml += `<div class="result-banner">${resultText}${extra}</div>`;
     panelHtml += '<button id="btnBack">Back to lobby</button>';
   } else {
     const legalTypes = legalTypesNow(chess);
@@ -920,12 +993,7 @@ function handleSquareClick(sq, fromSquares, destSquares){
 async function finishGame(g, winner, note){
   g.status = 'finished';
   g.winner = winner;
-  g.ratingNote = note;
-  if(g.mode==='random'){
-    const scoreWhite = winner==='w' ? 1 : winner==='b' ? 0 : 0.5;
-    const change = await applyEloResult(g.seats.white, g.seats.black, scoreWhite);
-    g.ratingNote = `${note} - White ${change.whiteChange>=0?'+':''}${change.whiteChange}, Black ${change.blackChange>=0?'+':''}${change.blackChange}`;
-  }
+  g.statusNote = note;
   await kset('hb:game:'+currentGameId, g, true);
 }
 
@@ -981,11 +1049,6 @@ async function makeMove(from, to){
     g.status = 'finished';
     if(chess.in_checkmate()){ g.winner = mv.color; }
     else { g.winner = 'draw'; }
-    if(g.mode==='random'){
-      const scoreWhite = g.winner==='w' ? 1 : g.winner==='b' ? 0 : 0.5;
-      const change = await applyEloResult(g.seats.white, g.seats.black, scoreWhite);
-      g.ratingNote = `White ${change.whiteChange>=0?'+':''}${change.whiteChange}, Black ${change.blackChange>=0?'+':''}${change.blackChange}`;
-    }
   }
 
   await kset('hb:game:'+currentGameId, g, true);
@@ -993,11 +1056,8 @@ async function makeMove(from, to){
 }
 
 // ================= INIT =================
-(async function init(){
-  const loggedIn = await ensureUser();
-  if(!loggedIn){ renderAuthScreen(); return; }
-  await afterAuth();
-})();
+// Startup is driven by auth.onAuthStateChanged (registered above), which calls
+// handleSignedIn() -> afterAuth() once Firebase Auth reports who's logged in.
 
 async function afterAuth(){
   const last = await kget('hb:lastgame', false);
