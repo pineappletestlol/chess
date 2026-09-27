@@ -224,6 +224,12 @@ function pieceImgUrl(color, type){
   return `https://commons.wikimedia.org/wiki/Special:FilePath/Chess_${type}${colorLetter}t45.svg`;
 }
 
+// A "position" for repetition purposes ignores the halfmove/fullmove counters (FIDE 9.2.2)
+// so we key on just the board, side to move, castling rights and en-passant target.
+function positionKey(chess){
+  return chess.fen().split(' ').slice(0,4).join(' ');
+}
+
 const firebaseConfig = {
   apiKey: "AIzaSyDZ5T0JcPWZviltGwBqu9AuRz_cEhdqr0s",
   authDomain: "anythingchess-46f24.firebaseapp.com",
@@ -651,6 +657,7 @@ async function createRoom(){
     winner: null,
     drawOffer: "",
     clock: freshClock(selectedTC),
+    positionCounts: { [positionKey(new Chess())]: 1 },
     seats: createMode==='team'
       ? {whiteBrain:"", whiteHand:"", blackBrain:"", blackHand:""}
       : {white:"", black:""}
@@ -714,6 +721,7 @@ async function quickMatch(){
     const game = {
       mode:'random', status:'active', fen:new Chess().fen(), turn:'w', announced:null,
       moveLog:[], winner:null, drawOffer:"", clock:clock,
+      positionCounts: { [positionKey(new Chess())]: 1 },
       seats: iAmWhite ? {white:ME.username, black:candidate} : {white:candidate, black:ME.username},
       ratingSnapshot: iAmWhite ? {white:myProfile.rating, black:oppProfile.rating} : {white:oppProfile.rating, black:myProfile.rating}
     };
@@ -844,9 +852,16 @@ async function clockTick(){
     const fresh = await kget('hb:game:'+gid, true);
     if(fresh && fresh.status==='active' && clockMs(fresh, fresh.turn) <= 0){
       const loser = fresh.turn;
+      // FIDE 6.9: if the flag falls and the opponent has no way to checkmate with
+      // any sequence of legal moves, the game is a draw rather than a loss.
+      const chessNow = new Chess(fresh.fen);
+      const isDraw = chessNow.insufficient_material();
       await db.ref(dbPath('hb:game:'+gid)).update({
-        status:'finished', winner: loser==='w'?'b':'w', statusNote:'won on time',
-        [loser==='w' ? 'clock/whiteMs' : 'clock/blackMs']: 0, 'clock/turnStartedAt': 0
+        status:'finished',
+        winner: isDraw ? 'draw' : (loser==='w'?'b':'w'),
+        statusNote: isDraw ? 'draw - insufficient material on time' : 'won on time',
+        [loser==='w' ? 'clock/whiteMs' : 'clock/blackMs']: 0,
+        'clock/turnStartedAt': 0
       });
     }
     return;
@@ -1184,11 +1199,15 @@ async function makeMove(from, to, promotion){
   const chess = new Chess(g.fen);
   const moverColor = chess.turn();
 
-  // If the mover's time already ran out, the move doesn't count - they lose on time.
+  // If the mover's time already ran out, the move doesn't count - they lose on time
+  // (or draw, per FIDE 6.9, if the opponent has insufficient mating material).
   if(g.clock && g.clock.initialSec>0 && g.clock.turnStartedAt){
     const mine = moverColor==='w' ? g.clock.whiteMs : g.clock.blackMs;
     if(serverNow() - g.clock.turnStartedAt >= mine){
-      g.status = 'finished'; g.winner = moverColor==='w' ? 'b' : 'w'; g.statusNote = 'won on time';
+      const isDraw = chess.insufficient_material();
+      g.status = 'finished';
+      g.winner = isDraw ? 'draw' : (moverColor==='w' ? 'b' : 'w');
+      g.statusNote = isDraw ? 'draw - insufficient material on time' : 'won on time';
       if(moverColor==='w') g.clock.whiteMs = 0; else g.clock.blackMs = 0;
       g.clock.turnStartedAt = 0;
       await kset('hb:game:'+currentGameId, g, true);
@@ -1216,9 +1235,21 @@ async function makeMove(from, to, promotion){
     g.clock.turnStartedAt = now;
   }
 
+  // FIDE 9.2: threefold repetition of a position (board + side to move + castling
+  // rights + en-passant target) is a draw. We track counts as we go rather than
+  // replaying the whole game each turn.
+  const key = positionKey(chess);
+  g.positionCounts = g.positionCounts || {};
+  g.positionCounts[key] = (g.positionCounts[key] || 0) + 1;
+
   if(chess.game_over()){
     g.status = 'finished';
     g.winner = chess.in_checkmate() ? mv.color : 'draw';
+    if(!chess.in_checkmate()) g.statusNote = g.statusNote || 'draw';
+  } else if(g.positionCounts[key] >= 3){
+    g.status = 'finished';
+    g.winner = 'draw';
+    g.statusNote = 'draw - threefold repetition';
   }
 
   await kset('hb:game:'+currentGameId, g, true);
@@ -1252,6 +1283,7 @@ async function acceptRematch(){
   const game = {
     mode:g.mode, status:'active', fen:new Chess().fen(), turn:'w', announced:null,
     moveLog:[], winner:null, drawOffer:"", seats,
+    positionCounts: { [positionKey(new Chess())]: 1 },
     clock:{initialSec:c.initialSec, incrementSec:c.incrementSec, whiteMs:c.initialSec*1000, blackMs:c.initialSec*1000, turnStartedAt:0}
   };
   if(g.mode==='random'){
