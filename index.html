@@ -230,6 +230,43 @@ function positionKey(chess){
   return chess.fen().split(' ').slice(0,4).join(' ');
 }
 
+// ---- sound effects (synthesized, no audio files to host) ----
+let audioCtx = null;
+function getAudioCtx(){
+  if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if(audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+function beep(freq, duration, type, gainStart, delay){
+  type = type || 'sine'; gainStart = gainStart===undefined ? 0.15 : gainStart; delay = delay || 0;
+  try{
+    const ctx = getAudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(gainStart, ctx.currentTime + delay);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + delay + duration);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(ctx.currentTime + delay);
+    osc.stop(ctx.currentTime + delay + duration + 0.02);
+  }catch(e){ /* audio not available - fail silently */ }
+}
+function playMoveSound(){ beep(520, 0.09, 'sine', 0.12); }
+function playCaptureSound(){ beep(240, 0.12, 'square', 0.13); }
+function playCheckSound(){ beep(880, 0.09, 'sine', 0.15); beep(660, 0.13, 'sine', 0.15, 0.09); }
+function playRandomizeSound(){ beep(420, 0.05, 'sine', 0.1); beep(600, 0.05, 'sine', 0.1, 0.05); beep(820, 0.08, 'sine', 0.12, 0.1); }
+function playLowTimeTick(){ beep(1050, 0.06, 'square', 0.11); }
+
+// Lichess doesn't use a fixed low-time threshold - it scales with the clock (roughly
+// 40s for a 5-minute game, 60s for a 10-minute game, based on observed alarm timings).
+// Fitting a line through those two points gives threshold ≈ 20 + 6.7% of the starting time.
+function lowTimeThresholdMs(clock){
+  if(!clock || clock.initialSec<=0) return 0;
+  const sec = 20 + clock.initialSec * 0.0667;
+  return Math.round(sec) * 1000;
+}
+
 const firebaseConfig = {
   apiKey: "AIzaSyDZ5T0JcPWZviltGwBqu9AuRz_cEhdqr0s",
   authDomain: "anythingchess-46f24.firebaseapp.com",
@@ -642,7 +679,7 @@ function startClock(game){
 
 function freshClock(tcKey){
   const tc = getTC(tcKey);
-  return {initialSec: tc.initial, incrementSec: tc.increment, whiteMs: tc.initial*1000, blackMs: tc.initial*1000, turnStartedAt: 0};
+  return {initialSec: tc.initial, incrementSec: tc.increment, tcKey: tc.key, whiteMs: tc.initial*1000, blackMs: tc.initial*1000, turnStartedAt: 0};
 }
 
 async function createRoom(){
@@ -804,6 +841,9 @@ function drawWaiting(code, game){
 let gameState = null;
 let flipped = false;
 let clockTickTimer = null;
+let lastSeenMoveCount = null; // null = "just loaded, don't play a sound for history"
+let tickGameTurnKey = null;   // resets the low-time beep counter whenever the turn (or game) changes
+let tickLastSecond = null;
 
 function enterGameScreen(code){
   currentGameId = code;
@@ -814,6 +854,9 @@ function enterGameScreen(code){
   gameState = null;
   selectedSquare = null;
   pendingPromotion = null;
+  lastSeenMoveCount = null;
+  tickGameTurnKey = null;
+  tickLastSecond = null;
   activeListenerRef = db.ref(dbPath('hb:game:'+code));
   activeListenerRef.on('value', snap=>{
     const g = snap.exists() ? snap.val() : null;
@@ -827,6 +870,16 @@ function enterGameScreen(code){
     gameState = g;
     const me = myRole(g);
     flipped = me && me.side==='b';
+    // Play a sound for any move that just landed - works for both the mover and the
+    // opponent/spectators, since it's driven off the synced state, not the local click.
+    const moveCount = g.moveLog ? g.moveLog.length : 0;
+    if(lastSeenMoveCount !== null && moveCount > lastSeenMoveCount){
+      const lastSan = g.moveLog[moveCount-1];
+      if(lastSan.includes('+') || lastSan.includes('#')) playCheckSound();
+      else if(lastSan.includes('x')) playCaptureSound();
+      else playMoveSound();
+    }
+    lastSeenMoveCount = moveCount;
     drawGame();
     if(g.status==='finished' && g.mode==='random'){ settleMyRating(g); }
   });
@@ -847,6 +900,19 @@ function clockMs(g, side){
 async function clockTick(){
   const g = gameState;
   if(!g || g.status!=='active' || !g.clock || g.clock.initialSec<=0 || !g.clock.turnStartedAt){ drawClocksOnly(); return; }
+
+  // Low-time tick: one beep per whole second while the side to move is under the
+  // adaptive threshold for this time control. Resets whenever the turn (or the
+  // game) changes, so it can't carry over incorrectly.
+  const turnKey = currentGameId + ':' + g.turn;
+  if(turnKey !== tickGameTurnKey){ tickGameTurnKey = turnKey; tickLastSecond = null; }
+  const remaining = clockMs(g, g.turn);
+  const threshold = lowTimeThresholdMs(g.clock);
+  if(threshold > 0 && remaining > 0 && remaining <= threshold){
+    const sec = Math.ceil(remaining/1000);
+    if(sec !== tickLastSecond){ tickLastSecond = sec; playLowTimeTick(); }
+  }
+
   if(clockMs(g, g.turn) <= 0){
     const gid = currentGameId;
     const fresh = await kget('hb:game:'+gid, true);
@@ -1135,6 +1201,7 @@ async function randomizeType(){
   // Weighted by move count per type - a rook with one legal move shouldn't be
   // as likely to get picked as a pawn with eight.
   const type = moves[Math.floor(Math.random()*moves.length)].piece;
+  playRandomizeSound();
   await announceType(type);
 }
 
