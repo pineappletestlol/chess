@@ -226,8 +226,11 @@ function pieceImgUrl(color, type){
 
 // A "position" for repetition purposes ignores the halfmove/fullmove counters (FIDE 9.2.2)
 // so we key on just the board, side to move, castling rights and en-passant target.
+// Firebase Realtime Database keys can't contain . # $ [ ] or / - a raw FEN has '/' in the
+// board part, so every write using this as an object key (positionCounts) was being
+// rejected by Firebase, silently failing createRoom/quickMatch/makeMove entirely.
 function positionKey(chess){
-  return chess.fen().split(' ').slice(0,4).join(' ');
+  return chess.fen().split(' ').slice(0,4).join(' ').replace(/[.#$\[\]\/]/g, '_');
 }
 
 // ---- sound effects (synthesized, no audio files to host) ----
@@ -263,9 +266,6 @@ function playLowTimeTick(){ beep(1050, 0.06, 'square', 0.11); }
 // Fitting a line through those two points gives threshold ≈ 20 + 6.7% of the starting time.
 function lowTimeThresholdMs(clock){
   if(!clock || clock.initialSec<=0) return 0;
-  // Hand-tuned values for the fastest controls; everything else follows the curve.
-  const overrides = {'1+0': 15, '3+2': 30};
-  if(clock.tcKey && overrides[clock.tcKey] != null) return overrides[clock.tcKey] * 1000;
   const sec = 20 + clock.initialSec * 0.0667;
   return Math.round(sec) * 1000;
 }
@@ -1354,7 +1354,7 @@ async function acceptRematch(){
     mode:g.mode, status:'active', fen:new Chess().fen(), turn:'w', announced:null,
     moveLog:[], winner:null, drawOffer:"", seats,
     positionCounts: { [positionKey(new Chess())]: 1 },
-    clock:{initialSec:c.initialSec, incrementSec:c.incrementSec, tcKey:c.tcKey||null, whiteMs:c.initialSec*1000, blackMs:c.initialSec*1000, turnStartedAt:0}
+    clock:{initialSec:c.initialSec, incrementSec:c.incrementSec, whiteMs:c.initialSec*1000, blackMs:c.initialSec*1000, turnStartedAt:0}
   };
   if(g.mode==='random'){
     const snap = g.ratingSnapshot;
