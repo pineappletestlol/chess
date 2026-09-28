@@ -263,6 +263,9 @@ function playLowTimeTick(){ beep(1050, 0.06, 'square', 0.11); }
 // Fitting a line through those two points gives threshold ≈ 20 + 6.7% of the starting time.
 function lowTimeThresholdMs(clock){
   if(!clock || clock.initialSec<=0) return 0;
+  // Hand-tuned values for the fastest controls; everything else follows the curve.
+  const overrides = {'1+0': 15, '3+2': 30};
+  if(clock.tcKey && overrides[clock.tcKey] != null) return overrides[clock.tcKey] * 1000;
   const sec = 20 + clock.initialSec * 0.0667;
   return Math.round(sec) * 1000;
 }
@@ -1351,7 +1354,7 @@ async function acceptRematch(){
     mode:g.mode, status:'active', fen:new Chess().fen(), turn:'w', announced:null,
     moveLog:[], winner:null, drawOffer:"", seats,
     positionCounts: { [positionKey(new Chess())]: 1 },
-    clock:{initialSec:c.initialSec, incrementSec:c.incrementSec, whiteMs:c.initialSec*1000, blackMs:c.initialSec*1000, turnStartedAt:0}
+    clock:{initialSec:c.initialSec, incrementSec:c.incrementSec, tcKey:c.tcKey||null, whiteMs:c.initialSec*1000, blackMs:c.initialSec*1000, turnStartedAt:0}
   };
   if(g.mode==='random'){
     const snap = g.ratingSnapshot;
