@@ -246,11 +246,15 @@ function beep(freq, duration, type, gainStart, delay){
     osc.stop(ctx.currentTime + delay + duration + 0.02);
   }catch(e){ /* audio not available - fail silently */ }
 }
-function playMoveSound(){ beep(520, 0.09, 'sine', 0.12); }
-function playCaptureSound(){ beep(240, 0.12, 'square', 0.13); }
-function playCheckSound(){ beep(880, 0.09, 'sine', 0.15); beep(660, 0.13, 'sine', 0.15, 0.09); }
-function playRandomizeSound(){ beep(420, 0.05, 'sine', 0.1); beep(600, 0.05, 'sine', 0.1, 0.05); beep(820, 0.08, 'sine', 0.12, 0.1); }
-function playLowTimeTick(){ beep(1050, 0.06, 'square', 0.11); }
+function playMoveSound(){ beep(520, 0.09, 'sine', 0.2); }
+function playCaptureSound(){ beep(240, 0.12, 'square', 0.18); }
+function playCheckSound(){ beep(880, 0.09, 'sine', 0.2); beep(660, 0.13, 'sine', 0.2, 0.09); }
+function playRandomizeSound(){ beep(420, 0.05, 'sine', 0.14); beep(600, 0.05, 'sine', 0.14, 0.05); beep(820, 0.08, 'sine', 0.16, 0.1); }
+function playLowTimeTick(){ beep(1050, 0.06, 'square', 0.15); }
+function playGameStartSound(){ beep(440, 0.08, 'sine', 0.16); beep(660, 0.1, 'sine', 0.18, 0.08); }
+function playWinSound(){ beep(523, 0.1, 'sine', 0.18); beep(659, 0.1, 'sine', 0.18, 0.1); beep(784, 0.18, 'sine', 0.2, 0.2); }
+function playLossSound(){ beep(392, 0.12, 'sine', 0.16); beep(330, 0.16, 'sine', 0.16, 0.11); beep(262, 0.22, 'sine', 0.16, 0.24); }
+function playDrawSound(){ beep(440, 0.1, 'sine', 0.15); beep(440, 0.14, 'sine', 0.15, 0.13); }
 
 // Lichess doesn't use a fixed low-time threshold - it scales with the clock (roughly
 // 40s for a 5-minute game, 60s for a 10-minute game, based on observed alarm timings).
@@ -833,9 +837,10 @@ function drawWaiting(code, game){
 let gameState = null;
 let flipped = false;
 let clockTickTimer = null;
-let lastSeenMoveCount = null; // null = "just loaded, don't play a sound for history"
+let lastSeenMoveCount = null; // null = "just loaded, don't play a move sound for history"
 let tickGameTurnKey = null;   // resets the low-time beep counter whenever the turn (or game) changes
 let tickLastSecond = null;
+let endSoundPlayed = false;   // guards against replaying win/loss/draw on every later snapshot
 
 function enterGameScreen(code){
   currentGameId = code;
@@ -849,6 +854,7 @@ function enterGameScreen(code){
   lastSeenMoveCount = null;
   tickGameTurnKey = null;
   tickLastSecond = null;
+  endSoundPlayed = false;
   activeListenerRef = db.ref(dbPath('hb:game:'+code));
   activeListenerRef.on('value', snap=>{
     const g = snap.exists() ? snap.val() : null;
@@ -865,13 +871,25 @@ function enterGameScreen(code){
     // Play a sound for any move that just landed - works for both the mover and the
     // opponent/spectators, since it's driven off the synced state, not the local click.
     const moveCount = g.moveLog ? g.moveLog.length : 0;
-    if(lastSeenMoveCount !== null && moveCount > lastSeenMoveCount){
+    if(lastSeenMoveCount === null){
+      // First snapshot of this session - a freshly-active, moveless game means we just
+      // walked in as it started (quick match found, or the last friend took their seat).
+      if(g.status==='active' && moveCount===0) playGameStartSound();
+    } else if(moveCount > lastSeenMoveCount){
       const lastSan = g.moveLog[moveCount-1];
       if(lastSan.includes('+') || lastSan.includes('#')) playCheckSound();
       else if(lastSan.includes('x')) playCaptureSound();
       else playMoveSound();
     }
     lastSeenMoveCount = moveCount;
+    if(g.status==='finished' && !endSoundPlayed){
+      endSoundPlayed = true;
+      if(me){
+        if(g.winner==='draw') playDrawSound();
+        else if(g.winner===me.side) playWinSound();
+        else playLossSound();
+      }
+    }
     drawGame();
     if(g.status==='finished' && g.mode==='random'){ settleMyRating(g); }
   });
