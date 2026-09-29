@@ -224,15 +224,6 @@ function pieceImgUrl(color, type){
   return `https://commons.wikimedia.org/wiki/Special:FilePath/Chess_${type}${colorLetter}t45.svg`;
 }
 
-// A "position" for repetition purposes ignores the halfmove/fullmove counters (FIDE 9.2.2)
-// so we key on just the board, side to move, castling rights and en-passant target.
-// Firebase Realtime Database keys can't contain . # $ [ ] or / - a raw FEN has '/' in the
-// board part, so every write using this as an object key (positionCounts) was being
-// rejected by Firebase, silently failing createRoom/quickMatch/makeMove entirely.
-function positionKey(chess){
-  return chess.fen().split(' ').slice(0,4).join(' ').replace(/[.#$\[\]\/]/g, '_');
-}
-
 // ---- sound effects (synthesized, no audio files to host) ----
 let audioCtx = null;
 function getAudioCtx(){
@@ -697,7 +688,6 @@ async function createRoom(){
     winner: null,
     drawOffer: "",
     clock: freshClock(selectedTC),
-    positionCounts: { [positionKey(new Chess())]: 1 },
     seats: createMode==='team'
       ? {whiteBrain:"", whiteHand:"", blackBrain:"", blackHand:""}
       : {white:"", black:""}
@@ -761,7 +751,6 @@ async function quickMatch(){
     const game = {
       mode:'random', status:'active', fen:new Chess().fen(), turn:'w', announced:null,
       moveLog:[], winner:null, drawOffer:"", clock:clock,
-      positionCounts: { [positionKey(new Chess())]: 1 },
       seats: iAmWhite ? {white:ME.username, black:candidate} : {white:candidate, black:ME.username},
       ratingSnapshot: iAmWhite ? {white:myProfile.rating, black:oppProfile.rating} : {white:oppProfile.rating, black:myProfile.rating}
     };
@@ -1305,24 +1294,33 @@ async function makeMove(from, to, promotion){
     g.clock.turnStartedAt = now;
   }
 
-  // FIDE 9.2: threefold repetition of a position (board + side to move + castling
-  // rights + en-passant target) is a draw. We track counts as we go rather than
-  // replaying the whole game each turn.
-  const key = positionKey(chess);
-  g.positionCounts = g.positionCounts || {};
-  g.positionCounts[key] = (g.positionCounts[key] || 0) + 1;
+  // FIDE 9.2: threefold repetition. chess.js only tracks repetition for moves it played
+  // itself, so replay the whole game on a fresh instance. Nothing extra is stored in the DB.
+  let repetition = false;
+  try{
+    const replay = new Chess();
+    for(const san of g.moveLog) replay.move(san);
+    repetition = replay.in_threefold_repetition();
+  }catch(e){ console.error('repetition check failed', e); }
 
   if(chess.game_over()){
     g.status = 'finished';
-    g.winner = chess.in_checkmate() ? mv.color : 'draw';
-    if(!chess.in_checkmate()) g.statusNote = g.statusNote || 'draw';
-  } else if(g.positionCounts[key] >= 3){
+    if(chess.in_checkmate()){
+      g.winner = mv.color;
+    } else {
+      g.winner = 'draw';
+      g.statusNote = chess.in_stalemate() ? 'draw - stalemate'
+        : chess.insufficient_material() ? 'draw - insufficient material'
+        : 'draw - 50-move rule';
+    }
+  } else if(repetition){
     g.status = 'finished';
     g.winner = 'draw';
     g.statusNote = 'draw - threefold repetition';
   }
 
-  await kset('hb:game:'+currentGameId, g, true);
+  const saved = await kset('hb:game:'+currentGameId, g, true);
+  if(!saved){ alert("Your move couldn't be saved to the server. Check your connection / Firebase rules (see browser console)."); return; }
   refreshGame();
 }
 
@@ -1353,7 +1351,6 @@ async function acceptRematch(){
   const game = {
     mode:g.mode, status:'active', fen:new Chess().fen(), turn:'w', announced:null,
     moveLog:[], winner:null, drawOffer:"", seats,
-    positionCounts: { [positionKey(new Chess())]: 1 },
     clock:{initialSec:c.initialSec, incrementSec:c.incrementSec, whiteMs:c.initialSec*1000, blackMs:c.initialSec*1000, turnStartedAt:0}
   };
   if(g.mode==='random'){
