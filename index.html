@@ -1546,5 +1546,96 @@ function myRoleForUser(g, username){
 })();
 </script>
 <!-- ===== END STEP 2 ===== -->
+  <!-- ===== PAWNIAC STEP 3: KNIGHT'S TOUR (paste this whole block right before </body>, below step 2) ===== -->
+<style>
+.sq.visited-n{font-weight:700;font-size:calc(var(--sq) * 0.28);color:rgba(20,20,15,.65);}
+</style>
+<script>
+(function(){
+  var kt = {path:[], best:0};
+  var KN = [[1,2],[2,1],[2,-1],[1,-2],[-1,-2],[-2,-1],[-2,1],[-1,2]];
+
+  function visited(f, r){
+    return kt.path.some(function(p){ return p[0]===f && p[1]===r; });
+  }
+  function movesFrom(cur){
+    return KN.map(function(d){ return [cur[0]+d[0], cur[1]+d[1]]; })
+      .filter(function(q){ return q[0]>=0 && q[0]<8 && q[1]>=0 && q[1]<8 && !visited(q[0], q[1]); });
+  }
+
+  window.renderMinigames = async function(){
+    showScreen('minigames');
+    kt.path = [];
+    kt.best = (await kget('hb:ktBest', false)) || 0;
+    draw();
+  };
+
+  function draw(){
+    var el = document.getElementById('screen-minigames');
+    var p = kt.path;
+    var cur = p[p.length-1];
+    var legal = cur ? movesFrom(cur) : [];
+    var done = p.length === 64;
+    var stuck = !!cur && !legal.length && !done;
+
+    var b = '<div class="board">';
+    for(var r=7; r>=0; r--){
+      for(var f=0; f<8; f++){
+        var idx = p.findIndex(function(q){ return q[0]===f && q[1]===r; });
+        var isCur = !!cur && cur[0]===f && cur[1]===r;
+        var cls = 'sq ' + (((f+r)%2===1) ? 'light' : 'dark');
+        if(isCur) cls += ' from';
+        else if(idx >= 0) cls += ' last visited-n';
+        if(legal.some(function(q){ return q[0]===f && q[1]===r; })) cls += ' dest';
+        var inner = isCur
+          ? '<img class="piece-img" src="' + pieceImgUrl('w','n') + '" alt="" onerror="this.outerHTML=\'&#9816;\'">'
+          : (idx >= 0 ? (idx+1) : '');
+        b += '<div class="' + cls + '" data-f="' + f + '" data-r="' + r + '">' + inner + '</div>';
+      }
+    }
+    b += '</div>';
+
+    var msg = !p.length ? 'Click any square to place your knight.'
+      : done ? 'You did it! All 64 squares visited.'
+      : stuck ? 'Stuck on ' + p.length + '/64 with no moves left. Undo or restart.'
+      : 'Visit every square exactly once using knight moves.';
+
+    el.innerHTML =
+      '<div class="card">' +
+        '<h2>Knight\'s tour</h2>' +
+        '<p class="desc">Move the knight so it lands on all 64 squares exactly once.</p>' +
+        '<div class="board-wrap">' + b +
+          '<div class="panel">' +
+            '<div class="announce ' + (done ? '' : 'empty') + '">' + p.length + '/64 squares</div>' +
+            '<div class="status-msg">' + msg + '<br>Your best: ' + kt.best + '/64</div>' +
+            '<div class="game-actions" style="border-top:none;margin-top:0;padding-top:0;">' +
+              '<button class="secondary" id="ktUndo"' + (p.length ? '' : ' disabled') + '>Undo</button>' +
+              '<button class="secondary" id="ktReset"' + (p.length ? '' : ' disabled') + '>Restart</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+
+    el.querySelectorAll('[data-f]').forEach(function(c){
+      c.onclick = function(){ click(+c.dataset.f, +c.dataset.r); };
+    });
+    document.getElementById('ktUndo').onclick = function(){ kt.path.pop(); draw(); };
+    document.getElementById('ktReset').onclick = function(){ kt.path = []; draw(); };
+  }
+
+  function click(f, r){
+    var cur = kt.path[kt.path.length-1];
+    if(cur && !movesFrom(cur).some(function(q){ return q[0]===f && q[1]===r; })) return;
+    kt.path.push([f, r]);
+    if(kt.path.length > kt.best){
+      kt.best = kt.path.length;
+      kset('hb:ktBest', kt.best, false);   // saved on this device only
+    }
+    if(kt.path.length === 64) playWinSound(); else playMoveSound();
+    draw();
+  }
+})();
+</script>
+<!-- ===== END STEP 3 ===== -->
 </body>
 </html>
