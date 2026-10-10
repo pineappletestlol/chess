@@ -1546,15 +1546,39 @@ function myRoleForUser(g, username){
 })();
 </script>
 <!-- ===== END STEP 2 ===== -->
-  <!-- ===== PAWNIAC STEP 3: KNIGHT'S TOUR (paste this whole block right before </body>, below step 2) ===== -->
+<!-- ===== PAWNIAC STEP 3 v2: TIMED KNIGHT'S TOUR + THEME-AWARE NAV (replaces the old step 3 block) ===== -->
 <style>
+/* nav bar follows light / dark theme */
+.navbar{background:#fffdf9;border:1px solid #e4ddcf;}
+.navbar a{color:#7a766c;}
+.navbar a:hover{color:#22201b;}
+.navbar a.active{color:#22201b;border-bottom-color:#1f6f5c;}
+[data-theme=dark] .navbar{background:#252320;border-color:#3a372f;}
+[data-theme=dark] .navbar a{color:#a29d90;}
+[data-theme=dark] .navbar a:hover,[data-theme=dark] .navbar a.active{color:#fff;}
+[data-theme=dark] .navbar a.active{border-bottom-color:#4fb59a;}
+
+/* knight's tour */
 .sq.visited-n{font-weight:700;font-size:calc(var(--sq) * 0.28);color:rgba(20,20,15,.65);}
+.kt-knight{font-size:calc(var(--sq) * 0.72);line-height:1;color:#141210;text-shadow:0 0 3px #f7f2e4,0 0 3px #f7f2e4;}
+.kt-time{font-family:monospace;font-size:26px;font-weight:700;text-align:center;margin-bottom:12px;}
 </style>
 <script>
 (function(){
-  var kt = {path:[], best:0};
+  var kt = {path:[], start:0, ms:0, done:false, timer:null, best:null, rows:null, msg:''};
   var KN = [[1,2],[2,1],[2,-1],[1,-2],[-1,-2],[-2,-1],[-2,1],[-1,2]];
 
+  function esc(s){
+    return String(s).replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+  function fmt(ms){
+    var tenths = Math.floor(ms / 100);
+    var m = Math.floor(tenths / 600);
+    var s = (tenths % 600) / 10;
+    return m + ':' + (s < 10 ? '0' : '') + s.toFixed(1);
+  }
   function visited(f, r){
     return kt.path.some(function(p){ return p[0]===f && p[1]===r; });
   }
@@ -1563,20 +1587,35 @@ function myRoleForUser(g, username){
       .filter(function(q){ return q[0]>=0 && q[0]<8 && q[1]>=0 && q[1]<8 && !visited(q[0], q[1]); });
   }
 
-  window.renderMinigames = async function(){
+  // ---- timer ----
+  function stopTimer(){ if(kt.timer){ clearInterval(kt.timer); kt.timer = null; } }
+  function startTimer(){ kt.start = Date.now(); kt.timer = setInterval(tick, 100); }
+  function tick(){
+    var e = document.getElementById('ktTimer');
+    if(!e || document.getElementById('screen-minigames').style.display !== 'block'){ stopTimer(); return; }
+    e.textContent = fmt(Date.now() - kt.start);
+  }
+  function resetRun(){
+    stopTimer();
+    kt.path = []; kt.start = 0; kt.ms = 0; kt.done = false; kt.msg = '';
+  }
+
+  // ---- page ----
+  window.renderMinigames = function(){
     showScreen('minigames');
-    kt.path = [];
-    kt.best = (await kget('hb:ktBest', false)) || 0;
+    resetRun();
+    document.getElementById('screen-minigames').innerHTML = '<div id="ktGame"></div><div id="ktBoard"></div>';
     draw();
+    loadBoard();
   };
 
   function draw(){
-    var el = document.getElementById('screen-minigames');
+    var el = document.getElementById('ktGame');
+    if(!el) return;
     var p = kt.path;
     var cur = p[p.length-1];
-    var legal = cur ? movesFrom(cur) : [];
-    var done = p.length === 64;
-    var stuck = !!cur && !legal.length && !done;
+    var legal = (cur && !kt.done) ? movesFrom(cur) : [];
+    var stuck = !!cur && !kt.done && !legal.length;
 
     var b = '<div class="board">';
     for(var r=7; r>=0; r--){
@@ -1587,29 +1626,28 @@ function myRoleForUser(g, username){
         if(isCur) cls += ' from';
         else if(idx >= 0) cls += ' last visited-n';
         if(legal.some(function(q){ return q[0]===f && q[1]===r; })) cls += ' dest';
-        var inner = isCur
-          ? '<img class="piece-img" src="' + pieceImgUrl('w','n') + '" alt="" onerror="this.outerHTML=\'&#9816;\'">'
-          : (idx >= 0 ? (idx+1) : '');
+        var inner = isCur ? '<span class="kt-knight">&#9822;&#xFE0E;</span>' : (idx >= 0 ? (idx+1) : '');
         b += '<div class="' + cls + '" data-f="' + f + '" data-r="' + r + '">' + inner + '</div>';
       }
     }
     b += '</div>';
 
-    var msg = !p.length ? 'Click any square to place your knight.'
-      : done ? 'You did it! All 64 squares visited.'
+    var msg = kt.done ? (kt.msg || 'All 64 squares visited!')
       : stuck ? 'Stuck on ' + p.length + '/64 with no moves left. Undo or restart.'
+      : !p.length ? 'Click any square to place your knight. The timer starts on your first move.'
       : 'Visit every square exactly once using knight moves.';
 
     el.innerHTML =
       '<div class="card">' +
         '<h2>Knight\'s tour</h2>' +
-        '<p class="desc">Move the knight so it lands on all 64 squares exactly once.</p>' +
+        '<p class="desc">Land on all 64 squares exactly once, as fast as you can.</p>' +
         '<div class="board-wrap">' + b +
           '<div class="panel">' +
-            '<div class="announce ' + (done ? '' : 'empty') + '">' + p.length + '/64 squares</div>' +
-            '<div class="status-msg">' + msg + '<br>Your best: ' + kt.best + '/64</div>' +
+            '<div class="kt-time" id="ktTimer">' + (kt.done ? fmt(kt.ms) : '0:00.0') + '</div>' +
+            '<div class="announce ' + (kt.done ? '' : 'empty') + '">' + p.length + '/64 squares</div>' +
+            '<div class="status-msg">' + msg + '<br>Your best time: ' + (kt.best ? fmt(kt.best) : 'none yet') + '</div>' +
             '<div class="game-actions" style="border-top:none;margin-top:0;padding-top:0;">' +
-              '<button class="secondary" id="ktUndo"' + (p.length ? '' : ' disabled') + '>Undo</button>' +
+              '<button class="secondary" id="ktUndo"' + ((p.length && !kt.done) ? '' : ' disabled') + '>Undo</button>' +
               '<button class="secondary" id="ktReset"' + (p.length ? '' : ' disabled') + '>Restart</button>' +
             '</div>' +
           '</div>' +
@@ -1619,23 +1657,82 @@ function myRoleForUser(g, username){
     el.querySelectorAll('[data-f]').forEach(function(c){
       c.onclick = function(){ click(+c.dataset.f, +c.dataset.r); };
     });
-    document.getElementById('ktUndo').onclick = function(){ kt.path.pop(); draw(); };
-    document.getElementById('ktReset').onclick = function(){ kt.path = []; draw(); };
+    document.getElementById('ktUndo').onclick = function(){
+      if(kt.done) return;
+      kt.path.pop();
+      if(!kt.path.length){ stopTimer(); kt.start = 0; }
+      draw();
+    };
+    document.getElementById('ktReset').onclick = function(){ resetRun(); draw(); };
   }
 
   function click(f, r){
+    if(kt.done) return;
     var cur = kt.path[kt.path.length-1];
     if(cur && !movesFrom(cur).some(function(q){ return q[0]===f && q[1]===r; })) return;
+    if(!kt.path.length) startTimer();
     kt.path.push([f, r]);
-    if(kt.path.length > kt.best){
-      kt.best = kt.path.length;
-      kset('hb:ktBest', kt.best, false);   // saved on this device only
+    if(kt.path.length === 64){
+      kt.ms = Date.now() - kt.start;
+      stopTimer();
+      kt.done = true;
+      playWinSound();
+      saveTime();
+    } else {
+      playMoveSound();
     }
-    if(kt.path.length === 64) playWinSound(); else playMoveSound();
     draw();
+  }
+
+  // ---- saving + leaderboard ----
+  async function saveTime(){
+    var ms = kt.ms;
+    if(kt.best && ms >= kt.best){
+      kt.msg = 'Finished in ' + fmt(ms) + '. Your best is still ' + fmt(kt.best) + '.';
+      draw();
+      return;
+    }
+    try{
+      await db.ref('hb/ktLeaderboard/' + ME.username).set({ms: ms});
+      kt.best = ms;
+      kt.msg = 'New personal best: ' + fmt(ms) + '!';
+    }catch(e){
+      console.error(e);
+      kt.msg = "Finished in " + fmt(ms) + ", but the time couldn't be saved (add the Firebase rule).";
+    }
+    draw();
+    loadBoard();
+  }
+
+  async function loadBoard(){
+    var box = document.getElementById('ktBoard');
+    if(!box) return;
+    box.innerHTML = '<div class="card"><h2>Fastest tours</h2><p class="desc">Loading...</p></div>';
+    var html;
+    try{
+      var snap = await db.ref('hb/ktLeaderboard').once('value');
+      var users = snap.exists() ? snap.val() : {};
+      kt.best = users[ME.username] ? users[ME.username].ms : kt.best;
+      var rows = Object.keys(users)
+        .map(function(u){ return {u:u, ms:users[u].ms}; })
+        .sort(function(a,b){ return a.ms - b.ms; })
+        .slice(0, 10);
+      html = rows.length
+        ? rows.map(function(x, i){
+            return '<div class="seat"><span class="who">#' + (i+1) + ' ' + esc(x.u) + (x.u===ME.username ? ' (you)' : '') +
+                   '</span><span class="taken">' + fmt(x.ms) + '</span></div>';
+          }).join('')
+        : '<p class="desc">No completed tours yet. Be the first!</p>';
+    }catch(e){
+      console.error(e);
+      html = '<p class="desc">Could not load the leaderboard right now.</p>';
+    }
+    box = document.getElementById('ktBoard');
+    if(box) box.innerHTML = '<div class="card"><h2>Fastest tours</h2><p class="desc">Top 10 fastest full tours.</p>' + html + '</div>';
+    if(document.getElementById('ktGame')) draw();
   }
 })();
 </script>
-<!-- ===== END STEP 3 ===== -->
+<!-- ===== END STEP 3 v2 ===== -->
 </body>
 </html>
