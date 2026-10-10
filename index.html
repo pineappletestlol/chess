@@ -2057,18 +2057,10 @@ textarea.pf-edit{width:100%;min-height:70px;border:1px solid #d8d1bf;border-radi
   screen.style.display = 'none';
   document.querySelector('.wrap').appendChild(screen);
 
-  var nav = document.getElementById('navbar');
-  var link = document.createElement('a');
-  link.dataset.nav = 'profile';
-  link.textContent = 'Profile';
-  link.onclick = function(){ window.openProfile(ME.username); };
-  nav.insertBefore(link, nav.querySelector('[data-nav="help"]'));
-
   var origShow = window.showScreen;
   window.showScreen = function(n){
     origShow(n);
     screen.style.display = (n === 'profile') ? 'block' : 'none';
-    link.classList.toggle('active', n === 'profile' && viewing === ME.username);
   };
 
   // your name in the top-right opens your profile
