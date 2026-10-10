@@ -2784,5 +2784,337 @@ body.no-last #screen-game .sq.dark.last:not(.from){background:#b58863;}
 })();
 </script>
 <!-- ===== END STEP 7 ===== -->
+  <!-- ===== PAWNIAC STEP 8: PROFILE PICTURES (paste right before </body>, below step 7) ===== -->
+<style>
+.pf-avatar{overflow:hidden;}
+.pf-avatar img{width:100%;height:100%;object-fit:cover;display:block;}
+.pf-avatar.editable{cursor:pointer;}
+.pf-ctl{margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.pf-ctl button{padding:6px 12px;font-size:12px;}
+</style>
+<script>
+(function(){
+  var MAX_GIF_BYTES = 140 * 1024;     // GIFs are stored as-is, so they have to be small
+  var MAX_CHARS     = 190000;         // must stay under the 200000 limit in the Firebase rule
+  var DATA_RE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+\/=]+$/;
+
+  function validUrl(u){ return typeof u === 'string' && u.length < 200000 && DATA_RE.test(u); }
+
+  function setImg(av, url){
+    av.innerHTML = '';
+    var im = new Image();
+    im.alt = '';
+    im.draggable = false;
+    im.src = url;
+    av.appendChild(im);
+  }
+  function setLetter(av, name){
+    av.textContent = name.charAt(0).toUpperCase();
+  }
+
+  // static images: crop to a centered square, shrink to 256x256, save as webp (or jpeg as fallback)
+  function toSquareDataUrl(file){
+    return new Promise(function(resolve, reject){
+      var objUrl = URL.createObjectURL(file);
+      var im = new Image();
+      im.onload = function(){
+        URL.revokeObjectURL(objUrl);
+        var S = 256, c = document.createElement('canvas');
+        c.width = c.height = S;
+        var ctx = c.getContext('2d');
+        var side = Math.min(im.width, im.height);
+        ctx.drawImage(im, (im.width - side) / 2, (im.height - side) / 2, side, side, 0, 0, S, S);
+        var out = c.toDataURL('image/webp', 0.85);
+        if(out.indexOf('data:image/webp') !== 0){
+          ctx.globalCompositeOperation = 'destination-over';
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, S, S);
+          out = c.toDataURL('image/jpeg', 0.85);
+        }
+        resolve(out);
+      };
+      im.onerror = function(){ URL.revokeObjectURL(objUrl); reject(new Error("Couldn't read that image.")); };
+      im.src = objUrl;
+    });
+  }
+  function readAsDataUrl(file){
+    return new Promise(function(resolve, reject){
+      var r = new FileReader();
+      r.onload = function(){ resolve(r.result); };
+      r.onerror = function(){ reject(new Error("Couldn't read that file.")); };
+      r.readAsDataURL(file);
+    });
+  }
+
+  async function prepare(file){
+    if(!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) throw new Error('Use a PNG, JPG, WebP or GIF.');
+    var url;
+    if(file.type === 'image/gif'){
+      if(file.size > MAX_GIF_BYTES) throw new Error('That GIF is too big (max ' + Math.round(MAX_GIF_BYTES / 1024) + ' KB).');
+      url = await readAsDataUrl(file);
+    } else {
+      url = await toSquareDataUrl(file);
+    }
+    if(!validUrl(url) || url.length > MAX_CHARS) throw new Error('That picture is too big. Try a smaller one.');
+    return url;
+  }
+
+  function stillOnProfile(name){
+    var scr = document.getElementById('screen-profile');
+    var n = scr && scr.querySelector('.pf-name');
+    return !!(scr && scr.style.display === 'block' && n && n.textContent.indexOf(name) === 0);
+  }
+
+  async function decorate(name){
+    var scr = document.getElementById('screen-profile');
+    var av = scr && scr.querySelector('.pf-avatar');
+    if(!av || !stillOnProfile(name)) return;
+
+    var url = null;
+    try{
+      var snap = await db.ref('hb/avatar/' + name).once('value');
+      url = snap.exists() ? snap.val() : null;
+    }catch(e){ console.error('avatar load failed', e); }
+    if(!stillOnProfile(name)) return;
+    if(validUrl(url)) setImg(av, url);
+
+    if(name !== ME.username) return;
+
+    // ---- own profile: picture controls ----
+    av.classList.add('editable');
+    var info = av.parentNode.querySelector('div:last-child');
+    var ctl = document.createElement('div');
+    ctl.className = 'pf-ctl';
+    ctl.innerHTML =
+      '<button class="secondary" id="avPick">Change picture</button>' +
+      '<button class="secondary danger" id="avDel" style="display:' + (validUrl(url) ? 'inline-block' : 'none') + ';">Remove</button>' +
+      '<span class="hint" id="avMsg">PNG, JPG, WebP or GIF (GIFs up to ' + Math.round(MAX_GIF_BYTES / 1024) + ' KB)</span>' +
+      '<input type="file" id="avFile" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none;">';
+    info.appendChild(ctl);
+
+    var msg = document.getElementById('avMsg');
+    var file = document.getElementById('avFile');
+    var del = document.getElementById('avDel');
+    var pickNow = function(){ file.click(); };
+    document.getElementById('avPick').onclick = pickNow;
+    av.onclick = pickNow;
+
+    file.onchange = async function(){
+      var f = file.files && file.files[0];
+      file.value = '';
+      if(!f) return;
+      msg.textContent = 'Saving...';
+      try{
+        var data = await prepare(f);
+        await db.ref('hb/avatar/' + ME.username).set(data);
+        setImg(av, data);
+        del.style.display = 'inline-block';
+        msg.textContent = 'Saved';
+      }catch(e){
+        console.error(e);
+        msg.textContent = (e && e.code === 'PERMISSION_DENIED')
+          ? "Couldn't save (publish the new Firebase rules)."
+          : (e && e.message) || "Couldn't save.";
+      }
+    };
+    del.onclick = async function(){
+      msg.textContent = 'Removing...';
+      try{
+        await db.ref('hb/avatar/' + ME.username).remove();
+        setLetter(av, ME.username);
+        del.style.display = 'none';
+        msg.textContent = 'Removed';
+      }catch(e){
+        console.error(e);
+        msg.textContent = "Couldn't remove.";
+      }
+    };
+  }
+
+  var prevOpen = window.openProfile;
+  window.openProfile = async function(name){
+    await prevOpen(name);
+    try{ await decorate(name); }catch(e){ console.error(e); }
+  };
+})();
+</script>
+<!-- ===== END STEP 8 ===== -->
+  <!-- ===== PAWNIAC STEP 9: PLAYER NAMES + RATINGS ON THE BOARD, COUNTRY FLAGS (paste right before </body>, below step 8) ===== -->
+<style>
+.flag{width:20px;height:15px;object-fit:cover;vertical-align:-2px;margin:0 5px 0 2px;border-radius:2px;}
+.pi-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:7px;border:1px solid #8a8574;vertical-align:-1px;}
+.pi-dot.w{background:#fff;}
+.pi-dot.b{background:#2b2924;}
+.pi-rating{opacity:.75;font-weight:500;}
+.pi-role{font-size:10px;opacity:.7;margin-left:2px;}
+.pi-sep{opacity:.5;margin:0 4px;}
+.clock .label.pi{font-size:13px;color:inherit;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:10px;}
+[data-theme=dark] .clock .label.pi{color:inherit;}
+.pbar{font-size:13px;font-weight:600;padding:6px 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.pf-country{display:flex;align-items:center;gap:6px;margin:4px 0 2px;font-size:13px;}
+.pf-country select{border:1px solid #d8d1bf;border-radius:7px;padding:5px 8px;font-size:13px;font-family:inherit;background:#fff;color:inherit;max-width:220px;}
+[data-theme=dark] .pf-country select{background:#1b1a17;border-color:#4a463b;color:#e8e4d8;}
+</style>
+<script>
+(function(){
+  var NAME_RE = /^[A-Za-z0-9_]{3,20}$/;
+  var CODES = ('AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ ' +
+    'CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR ' +
+    'GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP ' +
+    'KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ ' +
+    'NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW ' +
+    'SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ ' +
+    'UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS XK YE YT ZA ZM ZW').split(' ');
+
+  var dn = null;
+  try{ dn = new Intl.DisplayNames(['en'], {type:'region'}); }catch(e){}
+  function cname(code){
+    if(code === 'XK') return 'Kosovo';
+    try{ return (dn && dn.of(code)) || code; }catch(e){ return code; }
+  }
+  function esc(s){
+    return String(s).replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+  function flagHtml(code){
+    if(!/^[A-Z]{2}$/.test(code || '')) return '';
+    return '<img class="flag" src="https://flagcdn.com/w20/' + code.toLowerCase() + '.png" alt="' + code +
+           '" title="' + esc(cname(code)) + '" onerror="this.style.display=\'none\'">';
+  }
+
+  // ---------- country cache ----------
+  var COUNTRY = {}, pending = {};
+  function nameHtml(n){
+    if(!n) return '';
+    var nm = NAME_RE.test(n) ? '<span class="user-link" data-user="' + n + '">' + n + '</span>' : esc(n);
+    return flagHtml(COUNTRY[n]) + nm;
+  }
+  function fetchCountries(names, done){
+    names.forEach(function(n){
+      if(!n || COUNTRY[n] !== undefined || pending[n] || !NAME_RE.test(n)) return;
+      pending[n] = true;
+      db.ref('hb/country/' + n).once('value').then(function(s){
+        COUNTRY[n] = s.exists() ? s.val() : '';
+      }).catch(function(){
+        COUNTRY[n] = '';
+      }).then(function(){
+        delete pending[n];
+        done();
+      });
+    });
+  }
+
+  // ---------- player info on the board ----------
+  function infoHtml(g, color){
+    var s = g.seats || {};
+    var dot = '<span class="pi-dot ' + color + '"></span>';
+    if(g.mode === 'team'){
+      var pair = color === 'w' ? [[s.whiteBrain, 'Brain'], [s.whiteHand, 'Hand']] : [[s.blackBrain, 'Brain'], [s.blackHand, 'Hand']];
+      return dot + pair.filter(function(p){ return p[0]; }).map(function(p){
+        return nameHtml(p[0]) + '<span class="pi-role">' + p[1] + '</span>';
+      }).join('<span class="pi-sep">&middot;</span>');
+    }
+    var n = color === 'w' ? s.white : s.black;
+    var r = g.ratingSnapshot ? (color === 'w' ? g.ratingSnapshot.white : g.ratingSnapshot.black) : null;
+    return dot + nameHtml(n) + (typeof r === 'number' ? ' <span class="pi-rating">(' + r + ')</span>' : '');
+  }
+
+  function seatNames(g){
+    return Object.keys(g.seats || {}).map(function(k){ return g.seats[k]; }).filter(Boolean);
+  }
+
+  function decorateBars(){
+    var g = gameState; if(!g) return;
+    var scr = document.getElementById('screen-game');
+    var boardEl = scr && scr.querySelector('.board');
+    if(!boardEl) return;
+    scr.querySelectorAll('.pbar').forEach(function(b){ b.remove(); });
+
+    var top = flipped ? 'w' : 'b', bot = flipped ? 'b' : 'w';
+    var clocks = scr.querySelectorAll('.clock');
+    [[top, 0], [bot, 1]].forEach(function(t){
+      var html = infoHtml(g, t[0]);
+      if(clocks.length === 2){
+        var lab = clocks[t[1]].querySelector('.label');
+        if(lab){ lab.className = 'label pi'; lab.innerHTML = html; }
+      } else {
+        var bar = document.createElement('div');
+        bar.className = 'pbar';
+        bar.innerHTML = html;
+        boardEl.parentNode.insertBefore(bar, t[1] === 0 ? boardEl : boardEl.nextSibling);
+      }
+    });
+    fetchCountries(seatNames(g), function(){
+      if(gameState === g || gameState) decorateBars();
+    });
+  }
+
+  var prevDraw = window.drawGame;
+  window.drawGame = function(){
+    prevDraw();
+    try{ decorateBars(); }catch(e){ console.error('player bars failed', e); }
+  };
+
+  // ---------- country on profiles ----------
+  function stillOnProfile(name){
+    var scr = document.getElementById('screen-profile');
+    var n = scr && scr.querySelector('.pf-name');
+    return !!(scr && scr.style.display === 'block' && n && n.textContent.indexOf(name) === 0);
+  }
+
+  async function decorateProfile(name){
+    if(!stillOnProfile(name)) return;
+    var scr = document.getElementById('screen-profile');
+    var nameEl = scr.querySelector('.pf-name');
+    var code = '';
+    try{
+      var snap = await db.ref('hb/country/' + name).once('value');
+      code = snap.exists() ? snap.val() : '';
+    }catch(e){ console.error('country load failed', e); }
+    if(!stillOnProfile(name)) return;
+    COUNTRY[name] = code;
+
+    var row = document.createElement('div');
+    row.className = 'pf-country';
+    if(name !== ME.username){
+      if(!/^[A-Z]{2}$/.test(code)) return;
+      row.innerHTML = flagHtml(code) + '<span>' + esc(cname(code)) + '</span>';
+      nameEl.after(row);
+      return;
+    }
+    var opts = CODES.map(function(c){ return {c:c, n:cname(c)}; })
+      .sort(function(a, b){ return a.n.localeCompare(b.n); })
+      .map(function(o){ return '<option value="' + o.c + '"' + (o.c === code ? ' selected' : '') + '>' + esc(o.n) + '</option>'; })
+      .join('');
+    row.innerHTML = '<span id="pfFlag">' + flagHtml(code) + '</span>' +
+      '<select id="pfCountry" aria-label="Country"><option value=""' + (code ? '' : ' selected') + '>Country: not set</option>' + opts + '</select>' +
+      '<span class="hint" id="pfCountryMsg"></span>';
+    nameEl.after(row);
+
+    document.getElementById('pfCountry').onchange = async function(){
+      var v = this.value, msg = document.getElementById('pfCountryMsg');
+      msg.textContent = 'Saving...';
+      try{
+        if(v) await db.ref('hb/country/' + ME.username).set(v);
+        else await db.ref('hb/country/' + ME.username).remove();
+        COUNTRY[ME.username] = v;
+        document.getElementById('pfFlag').innerHTML = flagHtml(v);
+        msg.textContent = 'Saved';
+      }catch(e){
+        console.error(e);
+        msg.textContent = (e && e.code === 'PERMISSION_DENIED') ? "Couldn't save (publish the new Firebase rules)." : "Couldn't save.";
+      }
+    };
+  }
+
+  var prevOpen = window.openProfile;
+  window.openProfile = async function(name){
+    await prevOpen(name);
+    try{ await decorateProfile(name); }catch(e){ console.error(e); }
+  };
+})();
+</script>
+<!-- ===== END STEP 9 ===== -->
 </body>
 </html>
