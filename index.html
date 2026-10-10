@@ -3326,4 +3326,30 @@ body.no-last #screen-game .sq.dark.last:not(.from){background:#b58863;}
 })();
 </script>
 <!-- ===== END STEP 10 ===== -->
+  <!-- ===== PAWNIAC STEP 11: FULL-WIDTH LOBBY (paste at the very bottom, below step 10) ===== -->
+<style>
+/* lobby cards may use the full width */
+#screen-lobby .card{max-width:none;}
+
+/* stack: stats bar on top, everything else below */
+.lobby-cols{display:flex;flex-direction:column;gap:0;}
+.lobby-right{order:-1;position:static;}
+
+/* "Live now" turns into one slim row */
+.lobby-right .card{display:flex;flex-wrap:wrap;align-items:center;gap:10px 36px;padding:16px 24px;}
+.lobby-right .card h2{margin:0;}
+.lobby-right .live-row{padding:0;}
+.lobby-right .live-row + .live-row{border-top:none;}
+.lobby-right .hint{margin:0 0 0 auto !important;}
+
+/* left side: mode + time control full width, then two cards side by side */
+.lobby-left{display:grid;grid-template-columns:1fr 1fr;column-gap:24px;}
+.lobby-left > :nth-child(-n+3){grid-column:1 / -1;}
+
+@media (max-width:760px){
+  .lobby-left{grid-template-columns:1fr;}
+  .lobby-right .hint{margin:0 !important;}
+}
+</style>
+<!-- ===== END STEP 11 ===== -->
 </html>
