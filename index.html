@@ -3326,21 +3326,29 @@ body.no-last #screen-game .sq.dark.last:not(.from){background:#b58863;}
 })();
 </script>
 <!-- ===== END STEP 10 ===== -->
-  <!-- ===== PAWNIAC STEP 11: FULL-WIDTH LOBBY (paste at the very bottom, below step 10) ===== -->
+<!-- ===== PAWNIAC STEP 11 v2: FULL-WIDTH LOBBY + THIN LIVE BAR + CHESS QUOTE ===== -->
 <style>
 /* lobby cards may use the full width */
 #screen-lobby .card{max-width:none;}
 
-/* stack: stats bar on top, everything else below */
+/* stack: top bars first, everything else below */
 .lobby-cols{display:flex;flex-direction:column;gap:0;}
 .lobby-right{order:-1;position:static;}
 
-/* "Live now" turns into one slim row */
-.lobby-right .card{display:flex;flex-wrap:wrap;align-items:center;gap:10px 36px;padding:16px 24px;}
-.lobby-right .card h2{margin:0;}
-.lobby-right .live-row{padding:0;}
+/* thin "Live now" bar */
+.lobby-right .card{padding:10px 20px;margin-bottom:12px;}
+.lobby-right .card:not(.quote-card){display:flex;align-items:center;gap:30px;}
+.lobby-right .card h2{margin:0;font-size:14px;line-height:1;}
+.lobby-right .live-row{display:flex;align-items:center;gap:8px;padding:0;font-size:13px;line-height:1;white-space:nowrap;}
 .lobby-right .live-row + .live-row{border-top:none;}
-.lobby-right .hint{margin:0 0 0 auto !important;}
+.lobby-right .live-row b{font-size:16px;min-width:0;line-height:1;}
+.lobby-right .live-ico{font-size:12px;line-height:1;}
+#liveHint{display:none;}
+
+/* thin quote bar */
+.lobby-right .quote-card{display:flex;align-items:center;gap:10px;font-size:13px;line-height:1.4;margin-bottom:24px;}
+.quote-card .q-text{font-style:italic;}
+.quote-card .q-by{opacity:.6;white-space:nowrap;}
 
 /* left side: mode + time control full width, then two cards side by side */
 .lobby-left{display:grid;grid-template-columns:1fr 1fr;column-gap:24px;}
@@ -3348,8 +3356,52 @@ body.no-last #screen-game .sq.dark.last:not(.from){background:#b58863;}
 
 @media (max-width:760px){
   .lobby-left{grid-template-columns:1fr;}
-  .lobby-right .hint{margin:0 !important;}
+  .lobby-right .card:not(.quote-card){flex-wrap:wrap;gap:8px 20px;}
+  .lobby-right .quote-card{flex-wrap:wrap;}
 }
 </style>
-<!-- ===== END STEP 11 ===== -->
+<script>
+(function(){
+  var QUOTES = [
+    ['When you see a good move, look for a better one.', 'Emanuel Lasker'],
+    ['Chess is life in miniature.', 'Garry Kasparov'],
+    ['The pawns are the soul of chess.', 'Philidor'],
+    ['Every chess master was once a beginner.', 'Irving Chernev'],
+    ['Help your pieces so they can help you.', 'Paul Morphy'],
+    ['The blunders are all there on the board, waiting to be made.', 'Savielly Tartakower'],
+    ['Chess is the struggle against the error.', 'Johannes Zukertort'],
+    ['Play the opening like a book, the middle game like a magician, and the endgame like a machine.', 'Rudolf Spielmann'],
+    ['The beauty of a move lies not in its appearance but in the thought behind it.', 'Aaron Nimzowitsch']
+  ];
+  var last = -1, timer = null;
+
+  function show(box){
+    var i;
+    do{ i = Math.floor(Math.random() * QUOTES.length); }while(i === last && QUOTES.length > 1);
+    last = i;
+    box.querySelector('.q-text').textContent = '\u201C' + QUOTES[i][0] + '\u201D';
+    box.querySelector('.q-by').textContent = '\u2014 ' + QUOTES[i][1];
+  }
+
+  var prevLobby = window.renderLobby;
+  window.renderLobby = function(){
+    prevLobby();
+    try{
+      var side = document.querySelector('#screen-lobby .lobby-right');
+      if(!side || side.querySelector('.quote-card')) return;
+      var box = document.createElement('div');
+      box.className = 'card quote-card';
+      box.innerHTML = '<span class="q-text"></span><span class="q-by"></span>';
+      side.appendChild(box);
+      show(box);
+      clearInterval(timer);
+      timer = setInterval(function(){
+        if(!document.body.contains(box)){ clearInterval(timer); return; }
+        show(box);
+      }, 30000);
+    }catch(e){ console.error('quote box failed', e); }
+  };
+})();
+</script>
+<!-- ===== END STEP 11 v2 ===== -->
 </html>
