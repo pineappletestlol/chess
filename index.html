@@ -2531,7 +2531,7 @@ textarea.pf-edit{width:100%;min-height:70px;border:1px solid #d8d1bf;border-radi
 })();
 </script>
 <!-- ===== END STEP 6 ===== -->
-  <!-- ===== PAWNIAC STEP 7: SETTINGS (paste this whole block right before </body>, below step 6) ===== -->
+<!-- ===== PAWNIAC STEP 7: SETTINGS (paste this whole block right before </body>, below step 6) ===== -->
 <style>
 /* ---- toggle switch ---- */
 .switch{position:relative;width:42px;height:24px;flex-shrink:0;display:inline-block;}
@@ -2607,26 +2607,6 @@ body.no-last #screen-game .sq.dark.last:not(.from){background:#b58863;}
     };
   });
 
-  // ---------- quick mute button in the header ----------
-  var SPK_ON  = '<svg ' + ICON_ATTR + '><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg>';
-  var SPK_OFF = '<svg ' + ICON_ATTR + '><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M23 9l-6 6M17 9l6 6"/></svg>';
-  var spk = document.createElement('button');
-  spk.className = 'theme-toggle';
-  spk.id = 'soundToggle';
-  var tt = document.getElementById('themeToggle');
-  tt.parentNode.insertBefore(spk, tt);
-  function paintSpeaker(){
-    spk.innerHTML = S.sound ? SPK_ON : SPK_OFF;
-    spk.title = S.sound ? 'Mute all sounds' : 'Unmute sounds';
-    spk.setAttribute('aria-label', spk.title);
-  }
-  paintSpeaker();
-  spk.onclick = function(){
-    S.sound = !S.sound; save(); paintSpeaker();
-    if(S.sound && ORIG.playMoveSound) ORIG.playMoveSound();
-    if(document.getElementById('screen-settings').style.display === 'block') renderSettings();
-  };
-
   // ---------- the Settings screen + nav tab ----------
   var screen = document.createElement('div');
   screen.id = 'screen-settings';
@@ -2636,7 +2616,7 @@ body.no-last #screen-game .sq.dark.last:not(.from){background:#b58863;}
   // ---------- username menu: click your name -> "My profile" / "Settings" ----------
   function openSettings(){
     var inGame = document.getElementById('screen-game').style.display === 'block' && gameState && gameState.status === 'active';
-    if(inGame && !confirm('Your clock keeps running while you are away. Leave the game view?\n(Tip: the speaker button in the header mutes sounds without leaving.)')) return;
+    if(inGame && !confirm('Your clock keeps running while you are away. Leave the game view?')) return;
     stopPoll();
     renderSettings();
   }
@@ -2692,7 +2672,7 @@ body.no-last #screen-game .sq.dark.last:not(.from){background:#b58863;}
     var dim = S.sound ? '' : 'set-dim';
     screen.innerHTML =
       '<div class="card"><h2>Sound</h2>' +
-        '<p class="desc">Saved on this device. The speaker button in the header is a quick master mute.</p>' +
+        '<p class="desc">Saved on this device.</p>' +
         row('sound', 'All sounds', 'Master switch') +
         row('sMove', 'Move', '', 'playMoveSound', dim) +
         row('sCapture', 'Capture', '', 'playCaptureSound', dim) +
@@ -2722,7 +2702,7 @@ body.no-last #screen-game .sq.dark.last:not(.from){background:#b58863;}
     screen.querySelectorAll('[data-set]').forEach(function(cb){
       cb.onchange = function(){
         S[cb.dataset.set] = cb.checked;
-        save(); applyClasses(); paintSpeaker();
+        save(); applyClasses();
         if(cb.dataset.set === 'sound') renderSettings();   // dims / un-dims the individual sounds
       };
     });
@@ -2730,7 +2710,7 @@ body.no-last #screen-game .sq.dark.last:not(.from){background:#b58863;}
       b.onclick = function(){ var f = ORIG[b.dataset.play]; if(f) f(); };   // preview ignores the toggles
     });
     document.getElementById('setReset').onclick = function(){
-      S = Object.assign({}, DEFAULTS); save(); applyClasses(); paintSpeaker(); renderSettings();
+      S = Object.assign({}, DEFAULTS); save(); applyClasses(); renderSettings();
     };
   }
   window.renderSettings = renderSettings;
