@@ -1546,7 +1546,7 @@ function myRoleForUser(g, username){
 })();
 </script>
 <!-- ===== END STEP 2 ===== -->
-<!-- ===== PAWNIAC STEP 3 v2: TIMED KNIGHT'S TOUR + THEME-AWARE NAV (replaces the old step 3 block) ===== -->
+<!-- ===== PAWNIAC STEP 3 v3: TIMED KNIGHT'S TOUR, NO UNDO (replaces the v2 block) ===== -->
 <style>
 /* nav bar follows light / dark theme */
 .navbar{background:#fffdf9;border:1px solid #e4ddcf;}
@@ -1565,7 +1565,7 @@ function myRoleForUser(g, username){
 </style>
 <script>
 (function(){
-  var kt = {path:[], start:0, ms:0, done:false, timer:null, best:null, rows:null, msg:''};
+  var kt = {path:[], start:0, ms:0, done:false, over:false, timer:null, best:null, msg:''};
   var KN = [[1,2],[2,1],[2,-1],[1,-2],[-1,-2],[-2,-1],[-2,1],[-1,2]];
 
   function esc(s){
@@ -1597,7 +1597,7 @@ function myRoleForUser(g, username){
   }
   function resetRun(){
     stopTimer();
-    kt.path = []; kt.start = 0; kt.ms = 0; kt.done = false; kt.msg = '';
+    kt.path = []; kt.start = 0; kt.ms = 0; kt.done = false; kt.over = false; kt.msg = '';
   }
 
   // ---- page ----
@@ -1614,8 +1614,8 @@ function myRoleForUser(g, username){
     if(!el) return;
     var p = kt.path;
     var cur = p[p.length-1];
-    var legal = (cur && !kt.done) ? movesFrom(cur) : [];
-    var stuck = !!cur && !kt.done && !legal.length;
+    var ended = kt.done || kt.over;
+    var legal = (cur && !ended) ? movesFrom(cur) : [];
 
     var b = '<div class="board">';
     for(var r=7; r>=0; r--){
@@ -1633,21 +1633,20 @@ function myRoleForUser(g, username){
     b += '</div>';
 
     var msg = kt.done ? (kt.msg || 'All 64 squares visited!')
-      : stuck ? 'Stuck on ' + p.length + '/64 with no moves left. Undo or restart.'
+      : kt.over ? 'No moves left! You reached ' + p.length + '/64. Restart to try again.'
       : !p.length ? 'Click any square to place your knight. The timer starts on your first move.'
       : 'Visit every square exactly once using knight moves.';
 
     el.innerHTML =
       '<div class="card">' +
         '<h2>Knight\'s tour</h2>' +
-        '<p class="desc">Land on all 64 squares exactly once, as fast as you can.</p>' +
+        '<p class="desc">Land on all 64 squares exactly once, as fast as you can. No undo!</p>' +
         '<div class="board-wrap">' + b +
           '<div class="panel">' +
-            '<div class="kt-time" id="ktTimer">' + (kt.done ? fmt(kt.ms) : '0:00.0') + '</div>' +
+            '<div class="kt-time" id="ktTimer">' + (ended ? fmt(kt.ms) : '0:00.0') + '</div>' +
             '<div class="announce ' + (kt.done ? '' : 'empty') + '">' + p.length + '/64 squares</div>' +
             '<div class="status-msg">' + msg + '<br>Your best time: ' + (kt.best ? fmt(kt.best) : 'none yet') + '</div>' +
             '<div class="game-actions" style="border-top:none;margin-top:0;padding-top:0;">' +
-              '<button class="secondary" id="ktUndo"' + ((p.length && !kt.done) ? '' : ' disabled') + '>Undo</button>' +
               '<button class="secondary" id="ktReset"' + (p.length ? '' : ' disabled') + '>Restart</button>' +
             '</div>' +
           '</div>' +
@@ -1657,27 +1656,28 @@ function myRoleForUser(g, username){
     el.querySelectorAll('[data-f]').forEach(function(c){
       c.onclick = function(){ click(+c.dataset.f, +c.dataset.r); };
     });
-    document.getElementById('ktUndo').onclick = function(){
-      if(kt.done) return;
-      kt.path.pop();
-      if(!kt.path.length){ stopTimer(); kt.start = 0; }
-      draw();
-    };
     document.getElementById('ktReset').onclick = function(){ resetRun(); draw(); };
   }
 
   function click(f, r){
-    if(kt.done) return;
+    if(kt.done || kt.over) return;
     var cur = kt.path[kt.path.length-1];
     if(cur && !movesFrom(cur).some(function(q){ return q[0]===f && q[1]===r; })) return;
     if(!kt.path.length) startTimer();
     kt.path.push([f, r]);
+
     if(kt.path.length === 64){
       kt.ms = Date.now() - kt.start;
       stopTimer();
       kt.done = true;
       playWinSound();
       saveTime();
+    } else if(!movesFrom([f, r]).length){
+      // no squares left to jump to: the run is over, stop the clock
+      kt.ms = Date.now() - kt.start;
+      stopTimer();
+      kt.over = true;
+      playLossSound();
     } else {
       playMoveSound();
     }
@@ -1733,6 +1733,6 @@ function myRoleForUser(g, username){
   }
 })();
 </script>
-<!-- ===== END STEP 3 v2 ===== -->
+<!-- ===== END STEP 3 v3 ===== -->
 </body>
 </html>
