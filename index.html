@@ -1546,7 +1546,7 @@ function myRoleForUser(g, username){
 })();
 </script>
 <!-- ===== END STEP 2 ===== -->
-<!-- ===== PAWNIAC STEP 3 v3: TIMED KNIGHT'S TOUR, NO UNDO (replaces the v2 block) ===== -->
+<!-- ===== PAWNIAC STEP 3 v4: KNIGHT'S TOUR, EVERY RUN COUNTS (replaces the v3 block) ===== -->
 <style>
 /* nav bar follows light / dark theme */
 .navbar{background:#fffdf9;border:1px solid #e4ddcf;}
@@ -1579,6 +1579,11 @@ function myRoleForUser(g, username){
     var s = (tenths % 600) / 10;
     return m + ':' + (s < 10 ? '0' : '') + s.toFixed(1);
   }
+  // a run beats another if it covers more squares, or the same squares faster
+  function better(a, b){
+    return !b || a.sq > b.sq || (a.sq === b.sq && a.ms < b.ms);
+  }
+  function fmtBest(b){ return b ? b.sq + '/64 in ' + fmt(b.ms) : 'none yet'; }
   function visited(f, r){
     return kt.path.some(function(p){ return p[0]===f && p[1]===r; });
   }
@@ -1633,19 +1638,19 @@ function myRoleForUser(g, username){
     b += '</div>';
 
     var msg = kt.done ? (kt.msg || 'All 64 squares visited!')
-      : kt.over ? 'No moves left! You reached ' + p.length + '/64. Restart to try again.'
+      : kt.over ? 'No moves left! ' + (kt.msg || 'Restart to try again.')
       : !p.length ? 'Click any square to place your knight. The timer starts on your first move.'
-      : 'Visit every square exactly once using knight moves.';
+      : 'Visit as many squares as you can, each only once, using knight moves.';
 
     el.innerHTML =
       '<div class="card">' +
         '<h2>Knight\'s tour</h2>' +
-        '<p class="desc">Land on all 64 squares exactly once, as fast as you can. No undo!</p>' +
+        '<p class="desc">Cover as many squares as you can before you run out of moves. More squares wins; ties go to the faster time. No undo!</p>' +
         '<div class="board-wrap">' + b +
           '<div class="panel">' +
             '<div class="kt-time" id="ktTimer">' + (ended ? fmt(kt.ms) : '0:00.0') + '</div>' +
             '<div class="announce ' + (kt.done ? '' : 'empty') + '">' + p.length + '/64 squares</div>' +
-            '<div class="status-msg">' + msg + '<br>Your best time: ' + (kt.best ? fmt(kt.best) : 'none yet') + '</div>' +
+            '<div class="status-msg">' + msg + '<br>Your best: ' + fmtBest(kt.best) + '</div>' +
             '<div class="game-actions" style="border-top:none;margin-top:0;padding-top:0;">' +
               '<button class="secondary" id="ktReset"' + (p.length ? '' : ' disabled') + '>Restart</button>' +
             '</div>' +
@@ -1671,13 +1676,14 @@ function myRoleForUser(g, username){
       stopTimer();
       kt.done = true;
       playWinSound();
-      saveTime();
+      saveRun();
     } else if(!movesFrom([f, r]).length){
       // no squares left to jump to: the run is over, stop the clock
       kt.ms = Date.now() - kt.start;
       stopTimer();
       kt.over = true;
       playLossSound();
+      saveRun();
     } else {
       playMoveSound();
     }
@@ -1685,20 +1691,20 @@ function myRoleForUser(g, username){
   }
 
   // ---- saving + leaderboard ----
-  async function saveTime(){
-    var ms = kt.ms;
-    if(kt.best && ms >= kt.best){
-      kt.msg = 'Finished in ' + fmt(ms) + '. Your best is still ' + fmt(kt.best) + '.';
+  async function saveRun(){
+    var run = {sq: kt.path.length, ms: kt.ms};
+    if(!better(run, kt.best)){
+      kt.msg = 'Run: ' + run.sq + '/64 in ' + fmt(run.ms) + '. Your best is still ' + fmtBest(kt.best) + '.';
       draw();
       return;
     }
     try{
-      await db.ref('hb/ktLeaderboard/' + ME.username).set({ms: ms});
-      kt.best = ms;
-      kt.msg = 'New personal best: ' + fmt(ms) + '!';
+      await db.ref('hb/ktLeaderboard/' + ME.username).set(run);
+      kt.best = run;
+      kt.msg = 'New personal best: ' + run.sq + '/64 in ' + fmt(run.ms) + '!';
     }catch(e){
       console.error(e);
-      kt.msg = "Finished in " + fmt(ms) + ", but the time couldn't be saved (add the Firebase rule).";
+      kt.msg = "Run: " + run.sq + "/64, but it couldn't be saved (check the Firebase rule).";
     }
     draw();
     loadBoard();
@@ -1707,32 +1713,34 @@ function myRoleForUser(g, username){
   async function loadBoard(){
     var box = document.getElementById('ktBoard');
     if(!box) return;
-    box.innerHTML = '<div class="card"><h2>Fastest tours</h2><p class="desc">Loading...</p></div>';
+    box.innerHTML = '<div class="card"><h2>Top knights</h2><p class="desc">Loading...</p></div>';
     var html;
     try{
       var snap = await db.ref('hb/ktLeaderboard').once('value');
       var users = snap.exists() ? snap.val() : {};
-      kt.best = users[ME.username] ? users[ME.username].ms : kt.best;
       var rows = Object.keys(users)
-        .map(function(u){ return {u:u, ms:users[u].ms}; })
-        .sort(function(a,b){ return a.ms - b.ms; })
-        .slice(0, 10);
+        .map(function(u){ return {u:u, sq:users[u].sq, ms:users[u].ms}; })
+        .filter(function(x){ return typeof x.sq === 'number' && typeof x.ms === 'number'; });
+      var mine = rows.find(function(x){ return x.u === ME.username; });
+      if(mine) kt.best = {sq:mine.sq, ms:mine.ms};
+      rows.sort(function(a,b){ return (b.sq - a.sq) || (a.ms - b.ms); });
+      rows = rows.slice(0, 10);
       html = rows.length
         ? rows.map(function(x, i){
             return '<div class="seat"><span class="who">#' + (i+1) + ' ' + esc(x.u) + (x.u===ME.username ? ' (you)' : '') +
-                   '</span><span class="taken">' + fmt(x.ms) + '</span></div>';
+                   '</span><span class="taken">' + x.sq + '/64 &middot; ' + fmt(x.ms) + '</span></div>';
           }).join('')
-        : '<p class="desc">No completed tours yet. Be the first!</p>';
+        : '<p class="desc">No runs yet. Be the first!</p>';
     }catch(e){
       console.error(e);
       html = '<p class="desc">Could not load the leaderboard right now.</p>';
     }
     box = document.getElementById('ktBoard');
-    if(box) box.innerHTML = '<div class="card"><h2>Fastest tours</h2><p class="desc">Top 10 fastest full tours.</p>' + html + '</div>';
+    if(box) box.innerHTML = '<div class="card"><h2>Top knights</h2><p class="desc">Most squares covered, then fastest time.</p>' + html + '</div>';
     if(document.getElementById('ktGame')) draw();
   }
 })();
 </script>
-<!-- ===== END STEP 3 v3 ===== -->
+<!-- ===== END STEP 3 v4 ===== -->
 </body>
 </html>
