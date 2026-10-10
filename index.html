@@ -2005,7 +2005,7 @@ input[type=number]{border:1px solid #d8d1bf;border-radius:7px;padding:10px 12px;
 })();
 </script>
 <!-- ===== END STEP 4 ===== -->
-  <!-- ===== PAWNIAC STEP 5: PROFILES (paste this whole block right before </body>, below step 4) ===== -->
+<!-- ===== PAWNIAC STEP 5 (no "Recent games"): PROFILES. Replaces your old step 5 block. ===== -->
 <style>
 .user-link{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;}
 .user-link:hover{color:#1f6f5c;}
@@ -2016,8 +2016,6 @@ input[type=number]{border:1px solid #d8d1bf;border-radius:7px;padding:10px 12px;
 .pf-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
 .pf-box{border:1px solid #e4ddcf;border-radius:8px;padding:14px;text-align:center;}
 .pf-big{font-size:26px;font-weight:700;}
-.pf-badge{display:inline-block;width:24px;height:24px;line-height:24px;text-align:center;border-radius:5px;font-size:12px;font-weight:700;color:#fff;margin-right:12px;flex-shrink:0;}
-.pf-w{background:#1f6f5c;} .pf-l{background:#b8433f;} .pf-d{background:#8a8574;}
 textarea.pf-edit{width:100%;min-height:70px;border:1px solid #d8d1bf;border-radius:7px;padding:10px 12px;font-size:13.5px;font-family:inherit;resize:vertical;}
 [data-theme=dark] .pf-box{border-color:#3a372f;}
 [data-theme=dark] textarea.pf-edit{background:#1b1a17;border-color:#4a463b;color:#e8e4d8;}
@@ -2034,24 +2032,12 @@ textarea.pf-edit{width:100%;min-height:70px;border:1px solid #d8d1bf;border-radi
       return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
     });
   }
-  function userLink(n){ return NAME_RE.test(n) ? '<span class="user-link" data-user="' + n + '">' + n + '</span>' : esc(n); }
-  function oppLinks(opp){ return String(opp || '').split(' & ').map(userLink).join(' &amp; '); }
-  function ago(ts){
-    var s = Math.max(0, (Date.now() - ts) / 1000);
-    if(s < 60) return 'just now';
-    if(s < 3600) return Math.floor(s/60) + 'm ago';
-    if(s < 86400) return Math.floor(s/3600) + 'h ago';
-    return Math.floor(s/86400) + 'd ago';
-  }
   function fmtMs(ms){
     var t = Math.floor(ms / 100), m = Math.floor(t / 600), s = (t % 600) / 10;
     return m + ':' + (s < 10 ? '0' : '') + s.toFixed(1);
   }
-  function clockLabel(c){
-    return (!c || !(c.initialSec > 0)) ? 'no clock' : (c.initialSec/60) + '+' + (c.incrementSec || 0);
-  }
 
-  // ---- the profile screen + nav link ----
+  // ---- the profile screen ----
   var screen = document.createElement('div');
   screen.id = 'screen-profile';
   screen.style.display = 'none';
@@ -2090,14 +2076,7 @@ textarea.pf-edit{width:100%;min-height:70px;border:1px solid #d8d1bf;border-radi
     obs.observe(document.getElementById(id), {childList:true, subtree:true});
   });
 
-  // ---- recording stats + history when a game you played finishes ----
-  function oppNames(g, side){
-    var s = g.seats || {};
-    var keys = g.mode === 'team'
-      ? (side === 'w' ? ['blackBrain','blackHand'] : ['whiteBrain','whiteHand'])
-      : [side === 'w' ? 'black' : 'white'];
-    return keys.map(function(k){ return s[k]; }).filter(Boolean).join(' & ');
-  }
+  // ---- recording win/loss/draw counters when a game you played finishes ----
   async function record(g, gid, me){
     var v = g.mode === 'team' ? 'team' : (g.variant === 'standard' ? 'std' : 'hb');
     var res = g.winner === 'draw' ? 'd' : (g.winner === me.side ? 'w' : 'l');
@@ -2107,10 +2086,6 @@ textarea.pf-edit{width:100%;min-height:70px;border:1px solid #d8d1bf;border-radi
         c.w = c.w || 0; c.l = c.l || 0; c.d = c.d || 0;
         c[res] += 1;
         return c;
-      });
-      await db.ref('hb/history/' + ME.username + '/' + gid).set({
-        res:res, opp:oppNames(g, me.side), v:v, side:me.side, tc:clockLabel(g.clock),
-        ts:Date.now(), n:(g.moveLog || []).length, note:g.statusNote || ''
       });
       await db.ref('hb/game/' + gid + '/statsApplied/' + ME.username).set(true);
     }catch(e){ console.error('could not record game', e); }
@@ -2153,13 +2128,10 @@ textarea.pf-edit{width:100%;min-height:70px;border:1px solid #d8d1bf;border-radi
     }
     var r = await Promise.all([
       get('hb/profile/' + name), get('hb/leaderboard/' + name), get('hb/leaderboardStd/' + name),
-      get('hb/stats/' + name), get('hb/ktLeaderboard/' + name),
-      db.ref('hb/history/' + name).orderByChild('ts').limitToLast(15).once('value')
-        .then(function(s){ var a = []; s.forEach(function(c){ a.push(c.val()); }); return a.reverse(); })
-        .catch(function(){ return []; })
+      get('hb/stats/' + name), get('hb/ktLeaderboard/' + name)
     ]);
     if(viewing !== name) return;   // user clicked somewhere else while loading
-    var prof = r[0], stats = r[3] || {}, kt = r[4], hist = r[5];
+    var prof = r[0], stats = r[3] || {}, kt = r[4];
 
     if(own && !prof){
       var created = auth.currentUser && auth.currentUser.metadata && Date.parse(auth.currentUser.metadata.creationTime);
@@ -2180,14 +2152,6 @@ textarea.pf-edit{width:100%;min-height:70px;border:1px solid #d8d1bf;border-radi
              (s.w||0) + 'W &middot; ' + (s.l||0) + 'L &middot; ' + (s.d||0) + 'D</span></div>';
     }).join('');
 
-    var histRows = hist.length ? hist.map(function(h){
-      var rs = (h.res === 'w' || h.res === 'l') ? h.res : 'd';
-      return '<div class="seat"><span style="display:flex;align-items:center;"><span class="pf-badge pf-' + rs + '">' + rs.toUpperCase() + '</span>' +
-        '<span>vs ' + oppLinks(h.opp) + '<div class="hint">' + esc(VNAME[h.v] || '') + ' &middot; ' + esc(h.tc || '') +
-        ' &middot; ' + (+h.n || 0) + ' moves' + (h.note ? ' &middot; ' + esc(h.note) : '') + '</div></span></span>' +
-        '<span class="who">' + ago(+h.ts || 0) + '</span></div>';
-    }).join('') : '<p class="desc">No games recorded yet.</p>';
-
     var ktText = (kt && typeof kt.sq === 'number') ? kt.sq + '/64 in ' + fmtMs(kt.ms) : 'No runs yet';
 
     screen.innerHTML =
@@ -2199,8 +2163,7 @@ textarea.pf-edit{width:100%;min-height:70px;border:1px solid #d8d1bf;border-radi
       '</div>' +
       '<div class="card"><h2>Ratings</h2><div class="pf-grid">' + ratingBox('Hand &amp; Brain', r[1]) + ratingBox('Standard', r[2]) + '</div></div>' +
       '<div class="card"><h2>Record</h2>' + recordRows + '</div>' +
-      '<div class="card"><h2>Knight\'s tour best</h2><p class="desc" style="margin:0;">' + esc(ktText) + '</p></div>' +
-      '<div class="card"><h2>Recent games</h2>' + histRows + '</div>';
+      '<div class="card"><h2>Knight\'s tour best</h2><p class="desc" style="margin:0;">' + esc(ktText) + '</p></div>';
 
     if(own){
       var box = document.getElementById('pfBio');
@@ -2233,6 +2196,8 @@ textarea.pf-edit{width:100%;min-height:70px;border:1px solid #d8d1bf;border-radi
   var FIRST_MOVE_MS      = 30000;            // each side's first move (Lichess uses 30s)
   var FIRST_MOVE_MS_TEAM = 60000;            // team games need more time to coordinate
   var IDLE_MS            = 24*3600*1000;     // no-clock games: side to move forfeits after 24h of nothing
+  var GRACE_MS     = 8000;   // opponent must be gone this long before the box even appears (ignores blips)
+  var BACK_HOLD_MS = 5000;   // ...and must be back this long before the countdown is forgotten
   function firstMoveMs(g){ return g && g.mode === 'team' ? FIRST_MOVE_MS_TEAM : FIRST_MOVE_MS; }
 
   // How long a player must be gone before the opponent may claim. Mirrors the figures Lichess
@@ -2291,10 +2256,10 @@ textarea.pf-edit{width:100%;min-height:70px;border:1px solid #d8d1bf;border-radi
   }
 
   // ---------- 4. presence: "is this player actually looking at the game?" ----------
-  var PRES = {gid:null, names:[], loaded:false, meRef:null, listRef:null, listCb:null, connRef:null, connCb:null, absentSince:null};
+  var PRES = {gid:null, names:[], loaded:false, meRef:null, listRef:null, listCb:null, connRef:null, connCb:null, absentSince:null, backSince:null, stuckNow:false};
 
   function attach(gid){
-    PRES.gid = gid; PRES.names = []; PRES.loaded = false; PRES.absentSince = null;
+    PRES.gid = gid; PRES.names = []; PRES.loaded = false; PRES.absentSince = null; PRES.backSince = null; PRES.stuckNow = false;
     var meRef = db.ref('hb/presence/' + gid + '/' + ME.username);
     PRES.meRef = meRef;
     PRES.listRef = db.ref('hb/presence/' + gid);
@@ -2318,7 +2283,7 @@ textarea.pf-edit{width:100%;min-height:70px;border:1px solid #d8d1bf;border-radi
       PRES.meRef.onDisconnect().cancel();
       PRES.meRef.remove();
     }catch(e){}
-    PRES.gid = null; PRES.names = []; PRES.loaded = false; PRES.meRef = null; PRES.absentSince = null;
+    PRES.gid = null; PRES.names = []; PRES.loaded = false; PRES.meRef = null; PRES.absentSince = null; PRES.backSince = null; PRES.stuckNow = false;
   }
 
   // Is the opponent side unable to play right now? (empty seat counts as absent)
@@ -2339,11 +2304,20 @@ textarea.pf-edit{width:100%;min-height:70px;border:1px solid #d8d1bf;border-radi
     var g = gameState;
     if(!g || g.status !== 'active' || !ME || !myRole(g) || !PRES.loaded || PRES.gid !== currentGameId ||
        PRES.names.indexOf(ME.username) < 0){            // if WE look offline, never show a claim
-      PRES.absentSince = null; return;
+      PRES.absentSince = null; PRES.backSince = null; PRES.stuckNow = false; return;
     }
     var opp = myRole(g).side === 'w' ? 'b' : 'w';
-    if(sideStuck(g, opp, PRES.names)){ if(!PRES.absentSince) PRES.absentSince = Date.now(); }
-    else PRES.absentSince = null;
+    var stuck = sideStuck(g, opp, PRES.names), now = Date.now();
+    PRES.stuckNow = stuck;
+    if(stuck){
+      PRES.backSince = null;
+      if(!PRES.absentSince) PRES.absentSince = now;
+    } else if(PRES.absentSince){
+      // they reappeared: only forget the countdown if they stay for a few seconds (a flaky connection
+      // blinking on and off must not keep restarting it)
+      if(!PRES.backSince) PRES.backSince = now;
+      else if(now - PRES.backSince >= BACK_HOLD_MS){ PRES.absentSince = null; PRES.backSince = null; }
+    }
   }
 
   // ---------- 5. the "opponent left" box ----------
@@ -2351,46 +2325,42 @@ textarea.pf-edit{width:100%;min-height:70px;border:1px solid #d8d1bf;border-radi
     var g = gameState;
     var box = document.getElementById('abBox');
     var panel = document.querySelector('#screen-game .panel');
-    var show = g && g.status === 'active' && PRES.absentSince && panel &&
+    var show = g && g.status === 'active' && PRES.absentSince && PRES.stuckNow &&
+               (Date.now() - PRES.absentSince) >= GRACE_MS && panel &&
                document.getElementById('screen-game').style.display === 'block';
     if(!show){ if(box) box.remove(); return; }
 
-    var n = (g.moveLog || []).length, key, html;
-    if(n < 2){
-      var left = Math.max(0, Math.ceil((firstMoveMs(g) - (serverNow() - (g.moveAt || serverNow()))) / 1000));
-      key = 'first';
-      html = "Your opponent isn't connected. If the game doesn't get going, it is aborted in <b id=\"abSecs\">" + left +
-             "</b>s (no rating change). You can also abort it yourself.";
-    } else {
-      var wait = claimDelayMs(g.clock) - (Date.now() - PRES.absentSince);
-      if(wait > 0){
-        key = 'wait';
-        html = 'Your opponent left the game. You can claim the result in <b id="abSecs">' + Math.ceil(wait/1000) +
-               '</b>s. They may still come back.';
-      } else {
-        key = 'claim';
-        html = 'Your opponent left the game.' +
-               '<div class="draw-offer-btns"><button id="abWin">Claim victory</button><button class="secondary" id="abDraw">Call a draw</button></div>' +
-               '<div class="hint" style="margin-top:8px;">Or keep waiting - the game carries on if they come back.</div>';
-      }
-    }
-    if(!box){
+    // build the box once; every later call only changes its text / button visibility
+    if(!box || !box.querySelector('#abMsg')){
+      if(box) box.remove();
       box = document.createElement('div');
       box.id = 'abBox';
       box.className = 'draw-offer ab-box';
+      box.innerHTML =
+        '<div id="abMsg"></div>' +
+        '<div class="draw-offer-btns" id="abBtns" style="display:none;"><button id="abWin">Claim victory</button><button class="secondary" id="abDraw">Call a draw</button></div>' +
+        '<div class="hint" id="abHint" style="margin-top:8px;display:none;">Or keep waiting - the game carries on if they come back.</div>';
       panel.insertBefore(box, panel.firstChild);
+      document.getElementById('abWin').onclick = function(){ claim('win'); };
+      document.getElementById('abDraw').onclick = function(){ claim('draw'); };
     }
-    if(box.dataset.key !== key){
-      box.dataset.key = key;
-      box.innerHTML = html;
-      var w = document.getElementById('abWin'), d = document.getElementById('abDraw');
-      if(w) w.onclick = function(){ claim('win'); };
-      if(d) d.onclick = function(){ claim('draw'); };
+    var msg = document.getElementById('abMsg'), btns = document.getElementById('abBtns'), hint = document.getElementById('abHint');
+    var n = (g.moveLog || []).length, text, showBtns = false;
+    if(n < 2){
+      var left = Math.max(0, Math.ceil((firstMoveMs(g) - (serverNow() - (g.moveAt || serverNow()))) / 1000));
+      text = "Your opponent isn't connected. If the game doesn't get going, it is aborted in " + left + "s (no rating change). You can also abort it yourself.";
     } else {
-      var secs = document.getElementById('abSecs');
-      var m = /<b id="abSecs">(\d+)<\/b>/.exec(html);
-      if(secs && m) secs.textContent = m[1];
+      var wait = claimDelayMs(g.clock) - (Date.now() - PRES.absentSince);
+      if(wait > 0){
+        text = 'Your opponent left the game. You can claim the result in ' + Math.ceil(wait/1000) + 's. They may still come back.';
+      } else {
+        text = 'Your opponent left the game.';
+        showBtns = true;
+      }
     }
+    msg.textContent = text;
+    btns.style.display = showBtns ? 'flex' : 'none';
+    hint.style.display = showBtns ? 'block' : 'none';
   }
 
   async function claim(kind){
@@ -2441,12 +2411,14 @@ textarea.pf-edit{width:100%;min-height:70px;border:1px solid #d8d1bf;border-radi
 
   // ---------- 7. presence heartbeat loop ----------
   setInterval(function(){
-    var g = gameState;
-    var onGame = document.getElementById('screen-game').style.display === 'block';
-    var want = (ME && g && onGame && g.status === 'active' && currentGameId && myRole(g)) ? currentGameId : null;
-    if(want !== PRES.gid){ detach(); if(want) attach(want); }
-    updateAbsence();
-    paintAbandon();
+    try{
+      var g = gameState;
+      var onGame = document.getElementById('screen-game').style.display === 'block';
+      var want = (ME && g && onGame && g.status === 'active' && currentGameId && myRole(g)) ? currentGameId : null;
+      if(want !== PRES.gid){ detach(); if(want) attach(want); }
+      updateAbsence();
+    }catch(e){ console.error('presence tick failed', e); }
+    try{ paintAbandon(); }catch(e){ console.error('paintAbandon failed', e); }
   }, 1000);
 
   // ---------- 8. game screen touch-ups ----------
